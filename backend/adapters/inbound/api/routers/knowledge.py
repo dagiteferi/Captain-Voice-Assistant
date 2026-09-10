@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Header, status
 from pydantic import BaseModel
 
-from main import get_container
+# Import `get_container` lazily inside handlers to avoid import-time circular imports
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
@@ -36,6 +36,7 @@ async def ingest_documents(
     from domain.knowledge.entities import Document
     from uuid import uuid4
 
+    from main import get_container
     container = get_container()
     ingest = container.ingest_documents
 

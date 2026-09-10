@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Header, status
 from pydantic import BaseModel
 
-from main import get_container
+# Import `get_container` lazily inside handlers to avoid import-time circular imports
 from domain.conversation.entities import Conversation, Command
 from domain.conversation.value_objects import Language
 
@@ -33,6 +33,7 @@ async def submit_command(
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Only captain and crew can submit commands")
 
+    from main import get_container
     container = get_container()
     repository = container.conversation_repository
 
@@ -103,6 +104,7 @@ async def get_command(
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    from main import get_container
     container = get_container()
     repository = container.conversation_repository
 
@@ -154,6 +156,7 @@ async def get_command_trace(
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    from main import get_container
     container = get_container()
     repository = container.conversation_repository
 

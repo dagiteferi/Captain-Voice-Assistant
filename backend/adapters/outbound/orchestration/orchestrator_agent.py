@@ -96,7 +96,14 @@ class FlatLangGraphOrchestrator:
         )
 
         result = await self._graph.ainvoke(state)
-        result = cast(PipelineState, result)
+        # LangGraph may return a dict of updated fields or the PipelineState instance
+        if isinstance(result, dict):
+            # merge into the original state object for compatibility
+            for k, v in result.items():
+                setattr(state, k, v)
+            result = state
+        else:
+            result = cast(PipelineState, result)
 
         # Publish all captured events
         for event in result.events:

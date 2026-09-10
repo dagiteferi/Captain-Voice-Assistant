@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Header, status
 from pydantic import BaseModel
 
-from main import get_container
+# Import `get_container` lazily inside handlers to avoid import-time circular imports
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
@@ -34,6 +34,7 @@ async def get_conversation(
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    from main import get_container
     container = get_container()
     repository = container.conversation_repository
 
