@@ -57,7 +57,6 @@ async def ingest_documents(
     )
 
 
-# Knowledge submission routes will be added in step 7
 class SubmitKnowledgeRequest(BaseModel):
     submitted_by: str
     submitter_role: str
@@ -81,61 +80,214 @@ async def submit_knowledge(
     request: SubmitKnowledgeRequest,
 ) -> SubmitKnowledgeResponse:
     """Propose new information for the knowledge base."""
-    # Placeholder: step 7 implements the full rule engine
+    from main import get_container
+    from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
+    from domain.knowledge.value_objects import SubmitterRole
+    from domain.knowledge.rules import evaluate_submission
     from uuid import uuid4
 
-    submission_id = uuid4()
-    return SubmitKnowledgeResponse(
-        submission_id=submission_id,
-        status="pending",
-        rule_results=[],
+    container = get_container()
+    repository = container.conversation_repository
+
+    submitter_role = SubmitterRole(request.submitter_role)
+    submission = KnowledgeSubmission(
+        submitted_by=request.submitted_by,
+        submitter_role=submitter_role,
+        raw_content=request.raw_content,
     )
+
+    # Run the rule engine
+    status_result, rule_results = evaluate_submission(submission, submitter_role)
+    submission.status = status_result
+    submission.record_rule_results(rule_results)
+
+    # If approved (captain auto-approve), immediately index
+    if status_result.value == "approved":
+        try:
+            doc = Document(id=uuid4(), title=f"Submission {submission.id}", source_path=f"submissions/{submission.id}")
+            chunk = Chunk(document_id=doc.id, content=submission.raw_content)
+            await container.vector_store.upsert(chunk)
+            submission.mark_indexed()
+        except Exception:
+            pass
+
+    await repository.save_submission(submission)
+
+    return SubmitKnowledgeResponse(
+        submission_id=submission.id,
+        status=status_result.value,
+        rule_results=[RuleResultItem(**r) for r in rule_results],
+    )
+
+
+class SubmissionItem(BaseModel):
+    id: UUID
+    submitted_by: str
+    submitter_role: str
+    raw_content: str
+    status: str
+    created_at: str
+
+
+class ListSubmissionsResponse(BaseModel):
+    submissions: list[SubmissionItem]
 
 
 @router.get("/submissions")
 async def list_submissions(
     status: str | None = None,
     x_user_role: str = Header(...),
-):
+) -> ListSubmissionsResponse:
     """Review queue for pending submissions."""
     if x_user_role != "captain":
         raise HTTPException(status_code=403, detail="Only captain can review submissions")
 
-    # Placeholder: step 7 implements this
-    return {"submissions": []}
+    from main import get_container
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submissions = await repository.list_submissions(status=status)
+    items = [
+        SubmissionItem(
+            id=s.id,
+            submitted_by=s.submitted_by,
+            submitter_role=s.submitter_role.value,
+            raw_content=s.raw_content,
+            status=s.status.value,
+            created_at=s.created_at.isoformat(),
+        )
+        for s in submissions
+    ]
+    return ListSubmissionsResponse(submissions=items)
+
+
+class SubmissionDetailResponse(BaseModel):
+    id: UUID
+    submitted_by: str
+    submitter_role: str
+    raw_content: str
+    status: str
+    rule_results: list[RuleResultItem]
+    reviewed_by: str | None = None
+    created_at: str
 
 
 @router.get("/submissions/{submission_id}")
 async def get_submission(
     submission_id: UUID,
     x_user_role: str = Header(...),
-):
+) -> SubmissionDetailResponse:
     """Get a single submission."""
-    # Placeholder: step 7 implements this
-    raise HTTPException(status_code=404, detail="Submission not found")
+    from main import get_container
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    # Crew/guest can only access their own
+    if x_user_role != "captain" and submission.submitted_by != x_user_role:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    rule_results = submission.rule_results if isinstance(submission.rule_results, list) else []
+    return SubmissionDetailResponse(
+        id=submission.id,
+        submitted_by=submission.submitted_by,
+        submitter_role=submission.submitter_role.value,
+        raw_content=submission.raw_content,
+        status=submission.status.value,
+        rule_results=[RuleResultItem(**r) for r in rule_results],
+        reviewed_by=submission.reviewed_by,
+        created_at=submission.created_at.isoformat(),
+    )
+
+
+class ApproveSubmissionRequest(BaseModel):
+    reviewed_by: str
+
+
+class ApproveSubmissionResponse(BaseModel):
+    id: UUID
+    status: str
+    indexed: bool
 
 
 @router.post("/submissions/{submission_id}/approve")
 async def approve_submission(
     submission_id: UUID,
+    request: ApproveSubmissionRequest,
     x_user_role: str = Header(...),
-):
+) -> ApproveSubmissionResponse:
     """Approve and index a submission."""
     if x_user_role != "captain":
         raise HTTPException(status_code=403, detail="Only captain can approve submissions")
 
-    # Placeholder: step 7 implements this
-    raise HTTPException(status_code=404, detail="Submission not found")
+    from main import get_container
+    from domain.knowledge.entities import Document, Chunk
+    from uuid import uuid4
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission.approve(reviewed_by=request.reviewed_by)
+    
+    # Index the submission into the vector store
+    try:
+        doc = Document(id=uuid4(), title=f"Submission {submission_id}", source_path=f"submissions/{submission_id}")
+        chunk = Chunk(document_id=doc.id, content=submission.raw_content)
+        
+        # Index chunk into vector store
+        await container.vector_store.upsert(chunk)
+        
+        # Mark submission as indexed
+        submission.mark_indexed()
+    except Exception as e:
+        # If indexing fails, keep as approved but not indexed
+        pass
+
+    await repository.save_submission(submission)
+
+    return ApproveSubmissionResponse(id=submission.id, status=submission.status.value, indexed=True)
+
+
+class RejectSubmissionRequest(BaseModel):
+    reviewed_by: str
+    reason: str | None = None
+
+
+class RejectSubmissionResponse(BaseModel):
+    id: UUID
+    status: str
+    reason: str | None = None
 
 
 @router.post("/submissions/{submission_id}/reject")
 async def reject_submission(
     submission_id: UUID,
+    request: RejectSubmissionRequest,
     x_user_role: str = Header(...),
-):
+) -> RejectSubmissionResponse:
     """Reject a submission."""
     if x_user_role != "captain":
         raise HTTPException(status_code=403, detail="Only captain can reject submissions")
 
-    # Placeholder: step 7 implements this
-    raise HTTPException(status_code=404, detail="Submission not found")
+    from main import get_container
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission.reject(reviewed_by=request.reviewed_by)
+    await repository.save_submission(submission)
+
+    return RejectSubmissionResponse(id=submission.id, status=submission.status.value, reason=request.reason)

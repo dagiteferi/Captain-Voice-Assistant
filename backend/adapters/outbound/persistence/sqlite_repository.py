@@ -215,6 +215,81 @@ class SQLiteConversationRepository:
                 )
             return rows
 
+    async def save_submission(self, submission) -> None:
+        from domain.knowledge.entities import KnowledgeSubmission
+        from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+        
+        payload = json.dumps(submission.rule_results)
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await session.get(KnowledgeSubmissionModel, submission.id)
+                if row is None:
+                    session.add(
+                        KnowledgeSubmissionModel(
+                            id=submission.id,
+                            submitted_by=submission.submitted_by,
+                            submitter_role=submission.submitter_role.value,
+                            raw_content=submission.raw_content,
+                            status=submission.status.value,
+                            rule_results_json=payload,
+                            created_at=submission.created_at,
+                            reviewed_by=submission.reviewed_by,
+                        )
+                    )
+                    return
+                row.status = submission.status.value
+                row.reviewed_by = submission.reviewed_by
+                row.rule_results_json = payload
+
+    async def get_submission(self, submission_id: UUID):
+        from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
+        from domain.knowledge.entities import KnowledgeSubmission
+        from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+        
+        async with self._session_factory() as session:
+            row = await session.get(KnowledgeSubmissionModel, submission_id)
+            if row is None:
+                return None
+            rule_results = json.loads(row.rule_results_json) if row.rule_results_json else []
+            return KnowledgeSubmission(
+                id=row.id,
+                submitted_by=row.submitted_by,
+                submitter_role=SubmitterRole(row.submitter_role),
+                raw_content=row.raw_content,
+                status=SubmissionStatus(row.status),
+                rule_results=rule_results,
+                created_at=row.created_at,
+                reviewed_by=row.reviewed_by,
+            )
+
+    async def list_submissions(self, status: str | None = None) -> list:
+        from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
+        from domain.knowledge.entities import KnowledgeSubmission
+        from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+        
+        async with self._session_factory() as session:
+            base = select(KnowledgeSubmissionModel)
+            if status is not None:
+                base = base.where(KnowledgeSubmissionModel.status == status)
+            base = base.order_by(KnowledgeSubmissionModel.created_at.desc())
+            result = await session.scalars(base)
+            submissions = []
+            for row in result:
+                rule_results = json.loads(row.rule_results_json) if row.rule_results_json else []
+                submissions.append(
+                    KnowledgeSubmission(
+                        id=row.id,
+                        submitted_by=row.submitted_by,
+                        submitter_role=SubmitterRole(row.submitter_role),
+                        raw_content=row.raw_content,
+                        status=SubmissionStatus(row.status),
+                        rule_results=rule_results,
+                        created_at=row.created_at,
+                        reviewed_by=row.reviewed_by,
+                    )
+                )
+            return submissions
+
 
 def _command_from_row(row: CommandModel) -> Command:
     command = Command(
