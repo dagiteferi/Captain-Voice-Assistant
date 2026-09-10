@@ -1,28 +1,32 @@
-"""Domain events emitted during the conversational pipeline."""
-
 from dataclasses import dataclass
-from typing import Any
+from uuid import UUID
+
+from domain.events import DomainEvent
 
 
-@dataclass
-class RetrievalCompleted:
+@dataclass(frozen=True, kw_only=True)
+class RetrievalCompleted(DomainEvent):
+    command_id: UUID
     query: str
-    results: list[dict[str, Any]]
+    chunk_ids: tuple[UUID, ...]
+    similarity_scores: tuple[float, ...]
+    relevant: bool
 
 
-@dataclass
-class AnswerGrounded:
-    answer: str
-    citations: list[str]
-    confidence: float
+@dataclass(frozen=True, kw_only=True)
+class AnswerGrounded(DomainEvent):
+    command_id: UUID
+    answer_id: UUID
+    citations: tuple
 
 
-@dataclass
-class PipelineStarted:
-    command_id: str
+@dataclass(frozen=True, kw_only=True)
+class PipelineFallback(DomainEvent):
+    command_id: UUID
+    reason: str
 
 
-@dataclass
-class PipelineFinished:
-    command_id: str
-    status: str
+@dataclass(frozen=True, kw_only=True)
+class AudioResponseReady(DomainEvent):
+    command_id: UUID
+    audio_response_id: UUID

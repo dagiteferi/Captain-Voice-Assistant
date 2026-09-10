@@ -1,23 +1,35 @@
-"""Value objects used within the conversation domain."""
-
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
+from uuid import UUID
 
 
-@dataclass(frozen=True)
-class Citation:
-    source: str
-    page: int | None = None
-    snippet: str | None = None
+class CommandStatus(StrEnum):
+    PENDING = "pending"
+    GROUNDED = "grounded"
+    UNGROUNDED = "ungrounded"
+    FAILED = "failed"
+
+
+class PipelineStatus(StrEnum):
+    IN_PROGRESS = "in_progress"
+    GROUNDED = "grounded"
+    UNGROUNDED = "ungrounded"
+    FAILED = "failed"
 
 
 @dataclass(frozen=True)
 class Language:
     code: str
 
+    def __post_init__(self) -> None:
+        normalized = self.code.strip().lower()
+        if len(normalized) < 2:
+            raise ValueError("language code must be at least two characters")
+        object.__setattr__(self, "code", normalized)
 
-class PipelineStatus(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
+
+@dataclass(frozen=True)
+class Citation:
+    chunk_id: UUID
+    document_id: UUID | None = None
+    snippet: str | None = None

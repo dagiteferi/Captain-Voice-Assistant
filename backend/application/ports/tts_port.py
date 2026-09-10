@@ -1,9 +1,7 @@
-"""Port for text-to-speech services."""
+from typing import Protocol
 
-from typing import Protocol, runtime_checkable
+from domain.voice.entities import VoiceProfile
 
 
-@runtime_checkable
 class TTSPort(Protocol):
-    async def synthesize(self, text: str, *, voice_id: str | None = None) -> bytes:
-        ...
+    async def synthesize(self, text: str, voice_profile: VoiceProfile) -> bytes: ...

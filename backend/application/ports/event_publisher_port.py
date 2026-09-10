@@ -1,9 +1,7 @@
-"""Port for publishing domain events."""
+from typing import Protocol
 
-from typing import Protocol, runtime_checkable
+from domain.events import DomainEvent
 
 
-@runtime_checkable
 class EventPublisherPort(Protocol):
-    async def publish(self, event) -> None:
-        ...
+    async def publish(self, event: DomainEvent) -> None: ...
