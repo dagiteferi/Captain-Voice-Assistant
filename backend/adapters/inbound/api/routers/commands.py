@@ -185,5 +185,5 @@ async def stream_command_trace(command_id: UUID, x_user_role: str = Header(...))
         raise HTTPException(status_code=403, detail="Access denied")
 
     from adapters.inbound.api.sse import stream_events
-    return stream_events(command_id)
+    return await stream_events(command_id)
 

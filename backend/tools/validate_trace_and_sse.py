@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import httpx
+from httpx import ASGITransport
 
 from config.di_container import DIContainer
 from adapters.outbound.llm.fake_adapter import FakeLLMAdapter
@@ -48,7 +49,8 @@ async def run_validation():
 
     app = main.create_app()
 
-    async with httpx.AsyncClient(app=app, base_url="http://test") as client:
+    transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         # Start orchestration in background
         task = asyncio.create_task(container.orchestrator.execute(command))
 
