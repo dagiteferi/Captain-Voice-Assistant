@@ -2,7 +2,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Header, status
+from fastapi import APIRouter, HTTPException, Depends, Header, status, Query
 from pydantic import BaseModel
 
 # Import `get_container` lazily inside handlers to avoid import-time circular imports
@@ -160,30 +160,36 @@ async def get_command_trace(
     container = get_container()
     repository = container.conversation_repository
 
-    events = await repository.list_events(command_id)
+    rows = await repository.list_events_with_ids(command_id)
 
     trace_events = []
-    for event in events:
-        event_type = type(event).__name__
-        # Simple payload extraction
-        payload = {
-            "event_type": event_type,
-        }
-        trace_events.append(TraceEventModel(
-            event_type=event_type,
-            payload=payload,
-            occurred_at=event.occurred_at.isoformat(),
-        ))
+    for row in rows:
+        event_type = row["event_type"]
+        payload = {}
+        try:
+            import json
+
+            payload = json.loads(row["payload_json"]) if row.get("payload_json") else {}
+        except Exception:
+            payload = {}
+
+        trace_events.append(
+            TraceEventModel(
+                event_type=event_type,
+                payload=payload,
+                occurred_at=row["occurred_at"].isoformat(),
+            )
+        )
 
     return TraceResponse(command_id=command_id, events=trace_events)
 
 
 @router.get("/{command_id}/stream")
-async def stream_command_trace(command_id: UUID, x_user_role: str = Header(...)):
+async def stream_command_trace(command_id: UUID, x_user_role: str = Header(...), since_event_id: UUID | None = Query(None, alias="since_event_id")):
     """Stream pipeline trace as SSE."""
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from adapters.inbound.api.sse import stream_events
-    return await stream_events(command_id)
+    return await stream_events(command_id, since_event_id=since_event_id)
 

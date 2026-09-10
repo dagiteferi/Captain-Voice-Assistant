@@ -180,6 +180,41 @@ class SQLiteConversationRepository:
                 for row in result
             ]
 
+    async def list_events_with_ids(self, command_id: UUID, since_event_id: UUID | None = None) -> list[dict]:
+        """Return pipeline events as rows with id, event_type, payload_json, occurred_at.
+
+        If `since_event_id` is provided, only return events that occurred strictly
+        after that event (by occurred_at, with id as tiebreaker).
+        """
+        async with self._session_factory() as session:
+            base = select(PipelineEventModel).where(PipelineEventModel.command_id == command_id)
+
+            if since_event_id is not None:
+                since_row = await session.get(PipelineEventModel, since_event_id)
+                if since_row is not None:
+                    # only return events with occurred_at > since.occurred_at OR
+                    # occurred_at == since.occurred_at AND id > since_id
+                    base = base.where(
+                        (PipelineEventModel.occurred_at > since_row.occurred_at)
+                        | (
+                            (PipelineEventModel.occurred_at == since_row.occurred_at)
+                            & (PipelineEventModel.id > since_event_id)
+                        )
+                    )
+
+            result = await session.scalars(base.order_by(PipelineEventModel.occurred_at, PipelineEventModel.id))
+            rows = []
+            for row in result:
+                rows.append(
+                    {
+                        "id": row.id,
+                        "event_type": row.event_type,
+                        "payload_json": row.payload_json,
+                        "occurred_at": row.occurred_at,
+                    }
+                )
+            return rows
+
 
 def _command_from_row(row: CommandModel) -> Command:
     command = Command(

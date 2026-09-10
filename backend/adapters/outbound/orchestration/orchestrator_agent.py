@@ -143,6 +143,7 @@ class FlatLangGraphOrchestrator:
             command_id=state.command.id,
             query=state.command.input_text,
             chunk_ids=tuple(c.chunk_id for c in chunks),
+            similarity_scores=tuple(c.similarity_score for c in chunks),
             relevant=len(chunks) > 0,
         )
         state.events.append(event)
@@ -206,7 +207,7 @@ Answer:"""
             event = AnswerGrounded(
                 command_id=state.command.id,
                 answer_id=state.grounded_answer.id,
-                citation_chunk_ids=tuple(c.chunk_id for c in state.grounded_answer.citations),
+                citations=tuple(state.grounded_answer.citations),
             )
             state.events.append(event)
 
@@ -264,6 +265,7 @@ Answer:"""
             command_id=state.command.id,
             audio_response_id=audio_response.id,
             voice_profile_id=CAPTAIN_PRESET.id,
+            duration_ms=audio_response.duration_ms,
         )
         state.events.append(event)
 

@@ -9,6 +9,7 @@ class RetrievalCompleted(DomainEvent):
     command_id: UUID
     query: str
     chunk_ids: tuple[UUID, ...]
+    similarity_scores: tuple[float, ...]
     relevant: bool
 
 
@@ -16,7 +17,7 @@ class RetrievalCompleted(DomainEvent):
 class AnswerGrounded(DomainEvent):
     command_id: UUID
     answer_id: UUID
-    citation_chunk_ids: tuple[UUID, ...]
+    citations: tuple
 
 
 @dataclass(frozen=True, kw_only=True)

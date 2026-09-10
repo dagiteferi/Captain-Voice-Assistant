@@ -17,3 +17,4 @@ class AudioSynthesized(DomainEvent):
     command_id: UUID
     audio_response_id: UUID
     voice_profile_id: UUID
+    duration_ms: int
