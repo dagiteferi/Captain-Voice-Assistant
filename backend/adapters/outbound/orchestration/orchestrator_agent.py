@@ -19,11 +19,10 @@ from domain.conversation.events import (
     RetrievalCompleted,
     AnswerGrounded,
     TranslationCompleted,
-    AudioSynthesized,
     AudioResponseReady,
     PipelineFallback,
 )
-from domain.voice.events import AudioSynthesized as VoiceAudioSynthesized
+from domain.voice.events import AudioSynthesized
 
 
 class FlatLangGraphOrchestrator:
