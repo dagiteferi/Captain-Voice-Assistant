@@ -1,6 +1,8 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config.di_container import DIContainer
@@ -34,6 +36,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     @app.get("/api/v1/health")
     async def health():
         return JSONResponse({"status": "ok", "version": "0.1.0"})
@@ -43,6 +53,18 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
     app.include_router(audio.router, prefix="/api/v1")
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request, exc: RequestValidationError):
+        errors = exc.errors()
+        if errors:
+            msg = "; ".join([f"{'.'.join(str(l) for l in err.get('loc', []))}: {err.get('msg', 'invalid')}" for err in errors])
+        else:
+            msg = "Validation error"
+        return JSONResponse(
+            status_code=422,
+            content={"detail": msg},
+        )
 
     @app.exception_handler(Exception)
     async def exception_handler(request, exc):

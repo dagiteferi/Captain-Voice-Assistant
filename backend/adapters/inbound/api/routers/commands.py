@@ -184,6 +184,10 @@ async def get_command_trace(
     container = get_container()
     repository = container.conversation_repository
 
+    command = await repository.get_command(command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found")
+
     rows = await repository.list_events_with_ids(command_id)
     trace_events = []
     for row in rows:
@@ -211,6 +215,13 @@ async def stream_command_trace(
 ):
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+
+    container = get_container()
+    command = await container.conversation_repository.get_command(command_id)
+    if command is None:
+        raise HTTPException(status_code=404, detail="Command not found")
 
     from adapters.inbound.api.sse import stream_events
 

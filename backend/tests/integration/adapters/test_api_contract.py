@@ -46,6 +46,22 @@ async def test_health_is_public(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_cors_preflight(tmp_path) -> None:
+    container, client = await _app_client(tmp_path)
+    async with client:
+        resp = await client.options(
+            "/api/v1/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("access-control-allow-origin") == "http://localhost:5173"
+    await container.close()
+
+
+@pytest.mark.asyncio
 async def test_guest_cannot_submit_commands(tmp_path) -> None:
     container, client = await _app_client(tmp_path)
     async with client:
