@@ -7,6 +7,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from config.di_container import DIContainer
+from tests.fakes import HashingEmbedder
 from domain.knowledge.entities import KnowledgeSubmission
 from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
 
@@ -20,7 +21,7 @@ async def test_approved_submission_is_searchable():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
     await container.init_db()
 
     main._container = container

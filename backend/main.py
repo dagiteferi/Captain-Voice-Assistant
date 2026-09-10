@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config.di_container import DIContainer
 from config.settings import settings
-from adapters.inbound.api.routers import commands, conversations, knowledge
+from adapters.inbound.api.routers import audio, commands, conversations, knowledge
 
 
 _container: DIContainer | None = None
@@ -42,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(commands.router, prefix="/api/v1")
     app.include_router(conversations.router, prefix="/api/v1")
     app.include_router(knowledge.router, prefix="/api/v1")
+    app.include_router(audio.router, prefix="/api/v1")
 
     @app.exception_handler(Exception)
     async def exception_handler(request, exc):

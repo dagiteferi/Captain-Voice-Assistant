@@ -9,6 +9,8 @@ from httpx import AsyncClient, ASGITransport
 
 from config.di_container import DIContainer
 from adapters.outbound.llm.fake_adapter import FakeLLMAdapter
+from adapters.outbound.tts.fake_adapter import FakeTTSAdapter
+from tests.fakes import HashingEmbedder
 from domain.knowledge.entities import Document
 from domain.conversation.entities import Conversation
 from domain.conversation.value_objects import Language
@@ -22,12 +24,15 @@ async def test_trace_and_command_status():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
     await container.init_db()
 
     fake = FakeLLMAdapter()
+    fake_tts = FakeTTSAdapter()
     container.llm = fake
+    container.tts = fake_tts
     container.orchestrator.llm_port = fake
+    container.orchestrator.tts_port = fake_tts
 
     main._container = container
 
@@ -75,12 +80,15 @@ async def test_sse_stream_order_and_payload():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
     await container.init_db()
 
     fake = FakeLLMAdapter()
+    fake_tts = FakeTTSAdapter()
     container.llm = fake
+    container.tts = fake_tts
     container.orchestrator.llm_port = fake
+    container.orchestrator.tts_port = fake_tts
 
     main._container = container
 

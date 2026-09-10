@@ -1,12 +1,9 @@
-"""Command API routes."""
-
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Depends, Header, status, Query
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, status
 from pydantic import BaseModel
 
-# Import `get_container` lazily inside handlers to avoid import-time circular imports
-from domain.conversation.entities import Conversation, Command
+from domain.conversation.entities import Command, Conversation
 from domain.conversation.value_objects import Language
 
 router = APIRouter(prefix="/commands", tags=["commands"])
@@ -24,22 +21,40 @@ class CommandResponse(BaseModel):
     status: str
 
 
+def _require_operator(role: str) -> None:
+    if role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Only captain and crew can submit commands")
+
+
+async def _run_pipeline(command_id: UUID) -> None:
+    from main import get_container
+
+    container = get_container()
+    command = await container.conversation_repository.get_command(command_id)
+    if command is None:
+        return
+    try:
+        await container.orchestrator.execute(command)
+    except Exception:
+        command.mark_failed()
+        await container.conversation_repository.save_command(command)
+
+
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
 async def submit_command(
     request: SubmitCommandRequest,
+    background_tasks: BackgroundTasks,
     x_user_role: str = Header(...),
 ) -> CommandResponse:
-    """Submit a new captain/crew command."""
-    if x_user_role not in ("captain", "crew"):
-        raise HTTPException(status_code=403, detail="Only captain and crew can submit commands")
+    _require_operator(x_user_role)
 
     from main import get_container
+
     container = get_container()
     repository = container.conversation_repository
 
     conversation_id = request.conversation_id
     if conversation_id is None:
-        # Create a new conversation
         conversation = Conversation(
             captain_id=x_user_role,
             target_language=Language(request.target_language),
@@ -47,26 +62,16 @@ async def submit_command(
         await repository.save_conversation(conversation)
         conversation_id = conversation.id
     else:
-        # Load existing conversation
         conversation = await repository.get_conversation(conversation_id)
         if conversation is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-    # Create and run command through orchestrator
     command = Command(
         conversation_id=conversation_id,
         input_text=request.input_text,
     )
     await repository.save_command(command)
-
-    # Kick off async orchestration (in real impl, would queue this)
-    # For now, execute synchronously for dev
-    try:
-        await container.orchestrator.execute(command)
-    except Exception as e:
-        command.mark_failed()
-        await repository.save_command(command)
-        raise HTTPException(status_code=500, detail=f"Pipeline failed: {str(e)}")
+    background_tasks.add_task(_run_pipeline, command.id)
 
     return CommandResponse(
         command_id=command.id,
@@ -100,11 +105,11 @@ async def get_command(
     command_id: UUID,
     x_user_role: str = Header(...),
 ) -> GetCommandResponse:
-    """Get command status and result."""
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from main import get_container
+
     container = get_container()
     repository = container.conversation_repository
 
@@ -112,14 +117,32 @@ async def get_command(
     if command is None:
         raise HTTPException(status_code=404, detail="Command not found")
 
+    conversation = await repository.get_conversation(command.conversation_id)
+    target_language = conversation.target_language.code if conversation else "en"
+
     citations = []
     if command.grounded_answer:
         citations = [
-            CitationModel(chunk_id=c.chunk_id, similarity_score=0.0)
+            CitationModel(chunk_id=c.chunk_id, similarity_score=None, document_title=None)
             for c in command.grounded_answer.citations
         ]
 
     answer_text = command.grounded_answer.answer_text if command.grounded_answer else None
+    translated_text = None
+    audio_url = None
+    if command.grounded_answer:
+        translation = await repository.get_translation_for_answer(command.grounded_answer.id)
+        if translation:
+            translated_text = translation.translated_text
+            audio = await repository.get_audio_for_translation(translation.id)
+            if audio:
+                audio_url = f"/api/v1/audio/{audio.id}"
+
+    completed_at = None
+    if command.status.value != "pending":
+        events = await repository.list_events(command_id)
+        if events:
+            completed_at = events[-1].occurred_at.isoformat()
 
     return GetCommandResponse(
         command_id=command.id,
@@ -128,11 +151,11 @@ async def get_command(
         input_text=command.input_text,
         answer_text=answer_text,
         citations=citations,
-        translated_text=None,
-        target_language="en",
-        audio_url=None,
+        translated_text=translated_text,
+        target_language=target_language,
+        audio_url=audio_url,
         created_at=command.created_at.isoformat(),
-        completed_at=None,
+        completed_at=completed_at,
     )
 
 
@@ -152,30 +175,26 @@ async def get_command_trace(
     command_id: UUID,
     x_user_role: str = Header(...),
 ) -> TraceResponse:
-    """Get full pipeline trace for command."""
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from main import get_container
+    import json
+
     container = get_container()
     repository = container.conversation_repository
 
     rows = await repository.list_events_with_ids(command_id)
-
     trace_events = []
     for row in rows:
-        event_type = row["event_type"]
         payload = {}
         try:
-            import json
-
             payload = json.loads(row["payload_json"]) if row.get("payload_json") else {}
         except Exception:
             payload = {}
-
         trace_events.append(
             TraceEventModel(
-                event_type=event_type,
+                event_type=row["event_type"],
                 payload=payload,
                 occurred_at=row["occurred_at"].isoformat(),
             )
@@ -185,11 +204,14 @@ async def get_command_trace(
 
 
 @router.get("/{command_id}/stream")
-async def stream_command_trace(command_id: UUID, x_user_role: str = Header(...), since_event_id: UUID | None = Query(None, alias="since_event_id")):
-    """Stream pipeline trace as SSE."""
+async def stream_command_trace(
+    command_id: UUID,
+    x_user_role: str = Header(...),
+    since_event_id: UUID | None = Query(None, alias="since_event_id"),
+):
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from adapters.inbound.api.sse import stream_events
-    return await stream_events(command_id, since_event_id=since_event_id)
 
+    return await stream_events(command_id, since_event_id=since_event_id)

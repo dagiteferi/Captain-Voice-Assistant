@@ -96,20 +96,25 @@ async def submit_knowledge(
         raw_content=request.raw_content,
     )
 
-    # Run the rule engine
-    status_result, rule_results = evaluate_submission(submission, submitter_role)
+    hits = await container.vector_store.search(request.raw_content, limit=1)
+    max_similarity = hits[0].similarity_score if hits else 0.0
+    status_result, rule_results = evaluate_submission(
+        submission,
+        submitter_role,
+        similarity_fn=lambda _: max_similarity,
+    )
     submission.status = status_result
     submission.record_rule_results(rule_results)
 
-    # If approved (captain auto-approve), immediately index
     if status_result.value == "approved":
-        try:
-            doc = Document(id=uuid4(), title=f"Submission {submission.id}", source_path=f"submissions/{submission.id}")
-            chunk = Chunk(document_id=doc.id, content=submission.raw_content)
-            await container.vector_store.upsert(chunk)
-            submission.mark_indexed()
-        except Exception:
-            pass
+        doc = Document(
+            id=uuid4(),
+            title=f"Submission {submission.id}",
+            source_path=f"submissions/{submission.id}",
+        )
+        chunk = Chunk(document_id=doc.id, content=submission.raw_content)
+        await container.vector_store.upsert(chunk)
+        submission.mark_indexed()
 
     await repository.save_submission(submission)
 
@@ -237,24 +242,20 @@ async def approve_submission(
         raise HTTPException(status_code=404, detail="Submission not found")
 
     submission.approve(reviewed_by=request.reviewed_by)
-    
-    # Index the submission into the vector store
+
+    indexed = False
     try:
         doc = Document(id=uuid4(), title=f"Submission {submission_id}", source_path=f"submissions/{submission_id}")
         chunk = Chunk(document_id=doc.id, content=submission.raw_content)
-        
-        # Index chunk into vector store
         await container.vector_store.upsert(chunk)
-        
-        # Mark submission as indexed
         submission.mark_indexed()
-    except Exception as e:
-        # If indexing fails, keep as approved but not indexed
-        pass
+        indexed = True
+    except Exception:
+        indexed = False
 
     await repository.save_submission(submission)
 
-    return ApproveSubmissionResponse(id=submission.id, status=submission.status.value, indexed=True)
+    return ApproveSubmissionResponse(id=submission.id, status="approved", indexed=indexed)
 
 
 class RejectSubmissionRequest(BaseModel):

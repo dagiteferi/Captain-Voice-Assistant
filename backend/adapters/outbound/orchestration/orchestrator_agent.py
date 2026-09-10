@@ -93,10 +93,11 @@ class FlatLangGraphOrchestrator:
         return graph.compile()
 
     async def execute(self, command: Command) -> PipelineOutcome:
-        """Run the full pipeline for a command."""
+        conversation = await self.repository.get_conversation(command.conversation_id)
+        target_language = conversation.target_language.code if conversation else "en"
         state = PipelineState(
             command=command,
-            target_language=command.conversation_id.hex[:2],  # Placeholder; real lang from conversation
+            target_language=target_language,
         )
 
         result = await self._graph.ainvoke(state)
@@ -254,15 +255,15 @@ Answer:"""
             state.translation.translated_text,
             CAPTAIN_PRESET,
         )
-
-        # Placeholder: write to temp file (real impl would use proper file storage)
-        audio_path = f"/tmp/audio_{state.command.id}.wav"
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = self.audio_dir / f"{state.command.id}.wav"
+        audio_path.write_bytes(audio_bytes)
 
         audio_response = AudioResponse(
             translation_id=state.translation.id,
             voice_profile_id=CAPTAIN_PRESET.id,
-            audio_path=audio_path,
-            duration_ms=len(audio_bytes) // 100,  # Rough estimate
+            audio_path=str(audio_path),
+            duration_ms=max(len(audio_bytes) // 32, 1),
         )
 
         event = AudioSynthesized(
