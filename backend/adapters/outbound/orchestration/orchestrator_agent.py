@@ -1,5 +1,6 @@
 """Flat LangGraph pipeline orchestrator implementation."""
 
+from pathlib import Path
 from typing import cast
 
 from langgraph.graph import StateGraph, END
@@ -36,6 +37,7 @@ class FlatLangGraphOrchestrator:
         tts_port: TTSPort,
         event_publisher: EventPublisherPort,
         repository: ConversationRepositoryPort,
+        audio_dir: str | Path = "./data/audio",
     ):
         self.llm_port = llm_port
         self.vector_store_port = vector_store_port
@@ -43,6 +45,8 @@ class FlatLangGraphOrchestrator:
         self.tts_port = tts_port
         self.event_publisher = event_publisher
         self.repository = repository
+        self.audio_dir = Path(audio_dir)
+        self.audio_dir.mkdir(parents=True, exist_ok=True)
         self._graph = self._build_graph()
 
     def _build_graph(self) -> StateGraph:

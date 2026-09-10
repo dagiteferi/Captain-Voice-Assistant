@@ -99,6 +99,7 @@ async def test_translation_audio_and_event_roundtrip(
             command_id=command.id,
             query=command.input_text,
             chunk_ids=(uuid4(),),
+            similarity_scores=(0.91,),
             relevant=True,
         ),
     )

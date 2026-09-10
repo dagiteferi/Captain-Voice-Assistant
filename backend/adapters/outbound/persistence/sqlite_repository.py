@@ -154,6 +154,42 @@ class SQLiteConversationRepository:
                 row.duration_ms = audio.duration_ms
                 row.voice_profile_id = audio.voice_profile_id
 
+    async def get_translation_for_answer(self, answer_id: UUID) -> Translation | None:
+        async with self._session_factory() as session:
+            row = (
+                await session.scalars(
+                    select(TranslationModel).where(TranslationModel.answer_id == answer_id)
+                )
+            ).first()
+            if row is None:
+                return None
+            return Translation(
+                id=row.id,
+                answer_id=row.answer_id,
+                target_language=Language(row.target_language),
+                translated_text=row.translated_text,
+            )
+
+    async def get_audio_for_translation(self, translation_id: UUID) -> AudioResponse | None:
+        async with self._session_factory() as session:
+            row = (
+                await session.scalars(
+                    select(AudioResponseModel).where(
+                        AudioResponseModel.translation_id == translation_id
+                    )
+                )
+            ).first()
+            if row is None:
+                return None
+            return _audio_from_row(row)
+
+    async def get_audio_response(self, audio_id: UUID) -> AudioResponse | None:
+        async with self._session_factory() as session:
+            row = await session.get(AudioResponseModel, audio_id)
+            if row is None:
+                return None
+            return _audio_from_row(row)
+
     async def append_event(self, command_id: UUID, event: DomainEvent) -> None:
         event_type, payload_json = dump_event(event)
         async with self._session_factory() as session:
@@ -319,4 +355,14 @@ def _answer_from_row(row: GroundedAnswerModel) -> GroundedAnswer:
         command_id=row.command_id,
         answer_text=row.answer_text,
         citations=citations,
+    )
+
+
+def _audio_from_row(row: AudioResponseModel) -> AudioResponse:
+    return AudioResponse(
+        id=row.id,
+        translation_id=row.translation_id,
+        voice_profile_id=row.voice_profile_id,
+        audio_path=row.audio_path,
+        duration_ms=row.duration_ms,
     )

@@ -29,10 +29,13 @@ class ChromaVectorStoreAdapter:
     async def search(self, query: str, *, limit: int = 5) -> list[ChunkRef]:
         if limit < 1:
             return []
+        count = self._collection.count()
+        if count == 0:
+            return []
         query_embedding = self._embedder.embed_texts([query])[0]
         result = self._collection.query(
             query_embeddings=[query_embedding],
-            n_results=limit,
+            n_results=min(limit, count),
             include=["documents", "metadatas", "distances"],
         )
         ids = (result.get("ids") or [[]])[0]

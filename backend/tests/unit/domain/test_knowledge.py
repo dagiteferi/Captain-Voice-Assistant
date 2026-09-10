@@ -8,11 +8,9 @@ from domain.knowledge.rules import (
     BlocklistKeywordRule,
     DuplicateSimilarityRule,
     MinMaxLengthRule,
-    TrustedRoleAutoApproveRule,
-    decide_from_outcomes,
-    run_rule_chain,
+    evaluate_submission,
 )
-from domain.knowledge.value_objects import RuleContext, RuleVerdict, SubmitterRole
+from domain.knowledge.value_objects import RuleVerdict, SubmissionStatus, SubmitterRole
 
 
 def _submission(
@@ -36,7 +34,7 @@ def test_approved_submission_can_be_indexed() -> None:
     submission = _submission()
     submission.approve(reviewed_by="captain-1")
     submission.mark_indexed()
-    assert submission.status.value == "indexed"
+    assert submission.status is SubmissionStatus.INDEXED
     assert submission.reviewed_by == "captain-1"
 
 
@@ -53,67 +51,61 @@ def test_empty_chunk_rejected() -> None:
 
 
 def test_length_rule_fails_short_content() -> None:
-    outcome = MinMaxLengthRule().check(_submission("too short"), RuleContext())
+    outcome = MinMaxLengthRule.evaluate(_submission("too short"))
     assert outcome.verdict is RuleVerdict.FAIL
 
 
 def test_blocklist_rule_fails_on_hit() -> None:
-    rule = BlocklistKeywordRule(frozenset({"classified"}))
-    outcome = rule.check(_submission("This is classified material for the log."), RuleContext())
+    outcome = BlocklistKeywordRule.evaluate(
+        _submission("This is classified material for the log.")
+    )
     assert outcome.verdict is RuleVerdict.FAIL
 
 
-def test_duplicate_rule_uses_context_score() -> None:
-    rule = DuplicateSimilarityRule(threshold=0.92)
-    assert rule.check(_submission(), RuleContext(max_similarity=0.5)).verdict is RuleVerdict.PASS
-    assert rule.check(_submission(), RuleContext(max_similarity=0.95)).verdict is RuleVerdict.FAIL
+def test_duplicate_rule_uses_similarity_fn() -> None:
+    submission = _submission()
+    assert (
+        DuplicateSimilarityRule.evaluate(submission, similarity_fn=lambda _: 0.5).verdict
+        is RuleVerdict.NEEDS_REVIEW
+    )
+    assert (
+        DuplicateSimilarityRule.evaluate(submission, similarity_fn=lambda _: 0.99).verdict
+        is RuleVerdict.FAIL
+    )
 
 
 def test_guest_never_auto_approves_even_when_checks_pass() -> None:
-    submission = _submission(role=SubmitterRole.GUEST)
-    outcomes = run_rule_chain(
-        submission,
-        [
-            MinMaxLengthRule(),
-            BlocklistKeywordRule(frozenset({"secret-xyz"})),
-            DuplicateSimilarityRule(),
-            TrustedRoleAutoApproveRule(),
-        ],
-        RuleContext(),
+    status, _ = evaluate_submission(
+        _submission(role=SubmitterRole.GUEST),
+        SubmitterRole.GUEST,
+        similarity_fn=lambda _: 0.0,
     )
-    assert decide_from_outcomes(submission, outcomes) is RuleVerdict.NEEDS_REVIEW
+    assert status is SubmissionStatus.PENDING
 
 
 def test_captain_auto_approves_when_checks_pass() -> None:
-    submission = _submission(role=SubmitterRole.CAPTAIN)
-    outcomes = run_rule_chain(
-        submission,
-        [
-            MinMaxLengthRule(),
-            BlocklistKeywordRule(frozenset()),
-            DuplicateSimilarityRule(),
-            TrustedRoleAutoApproveRule(),
-        ],
-        RuleContext(),
+    status, _ = evaluate_submission(
+        _submission(role=SubmitterRole.CAPTAIN),
+        SubmitterRole.CAPTAIN,
+        similarity_fn=lambda _: 0.0,
     )
-    assert decide_from_outcomes(submission, outcomes) is RuleVerdict.PASS
+    assert status is SubmissionStatus.APPROVED
 
 
 def test_crew_passing_checks_goes_to_review() -> None:
-    submission = _submission(role=SubmitterRole.CREW)
-    outcomes = run_rule_chain(
-        submission,
-        [MinMaxLengthRule(), TrustedRoleAutoApproveRule()],
-        RuleContext(),
+    status, _ = evaluate_submission(
+        _submission(role=SubmitterRole.CREW),
+        SubmitterRole.CREW,
+        similarity_fn=lambda _: 0.0,
     )
-    assert decide_from_outcomes(submission, outcomes) is RuleVerdict.NEEDS_REVIEW
+    assert status is SubmissionStatus.PENDING
 
 
-def test_hard_fail_stops_the_chain() -> None:
-    outcomes = run_rule_chain(
+def test_hard_fail_rejects_regardless_of_role() -> None:
+    status, results = evaluate_submission(
         _submission("no"),
-        [MinMaxLengthRule(), TrustedRoleAutoApproveRule()],
-        RuleContext(),
+        SubmitterRole.CAPTAIN,
+        similarity_fn=lambda _: 0.0,
     )
-    assert len(outcomes) == 1
-    assert outcomes[0].verdict is RuleVerdict.FAIL
+    assert status is SubmissionStatus.REJECTED
+    assert any(item["rule"] == "MinMaxLengthRule" and item["outcome"] == "fail" for item in results)
