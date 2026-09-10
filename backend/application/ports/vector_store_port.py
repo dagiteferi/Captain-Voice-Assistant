@@ -1,9 +1,10 @@
-"""Port for vector store operations."""
+from typing import Protocol
 
-from typing import Protocol, runtime_checkable
+from domain.knowledge.entities import Chunk
+from domain.knowledge.value_objects import ChunkRef
 
 
-@runtime_checkable
 class VectorStorePort(Protocol):
-    async def search(self, query: str, *, limit: int = 5) -> list[dict]:
-        ...
+    async def search(self, query: str, *, limit: int = 5) -> list[ChunkRef]: ...
+
+    async def upsert(self, chunk: Chunk) -> None: ...

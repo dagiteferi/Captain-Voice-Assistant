@@ -1,9 +1,14 @@
-"""Port for LLM interactions."""
+from collections.abc import Sequence
+from typing import Protocol
 
-from typing import Protocol, runtime_checkable
+from domain.knowledge.value_objects import ChunkRef
 
 
-@runtime_checkable
 class LLMPort(Protocol):
-    async def generate(self, prompt: str, *, system_prompt: str | None = None) -> str:
-        ...
+    async def generate(
+        self,
+        query: str,
+        chunks: Sequence[ChunkRef],
+        *,
+        system_prompt: str | None = None,
+    ) -> str: ...

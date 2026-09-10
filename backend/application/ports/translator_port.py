@@ -1,9 +1,13 @@
-"""Port for translation services."""
+from typing import Protocol
 
-from typing import Protocol, runtime_checkable
+from domain.conversation.value_objects import Language
 
 
-@runtime_checkable
 class TranslatorPort(Protocol):
-    async def translate(self, text: str, *, source_language: str, target_language: str) -> str:
-        ...
+    async def translate(
+        self,
+        text: str,
+        target_language: Language,
+        *,
+        source_language: Language | None = None,
+    ) -> str: ...
