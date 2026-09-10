@@ -31,7 +31,7 @@ class KnowledgeSubmission:
     raw_content: str
     id: UUID = field(default_factory=uuid4)
     status: SubmissionStatus = SubmissionStatus.PENDING
-    rule_results: list[dict[str, str]] = field(default_factory=list)
+    rule_results: list[dict] = field(default_factory=list)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     reviewed_by: str | None = None
 
@@ -41,7 +41,7 @@ class KnowledgeSubmission:
         if not self.submitted_by.strip():
             raise ValueError("submitted_by is required")
 
-    def record_rule_results(self, results: list[dict[str, str]]) -> None:
+    def record_rule_results(self, results: list[dict]) -> None:
         self.rule_results = list(results)
 
     def approve(self, reviewed_by: str | None = None) -> None:
