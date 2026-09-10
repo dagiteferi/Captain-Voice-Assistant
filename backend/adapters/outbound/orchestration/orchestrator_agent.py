@@ -18,10 +18,10 @@ from domain.voice.entities import AudioResponse, Translation, CAPTAIN_PRESET
 from domain.conversation.events import (
     RetrievalCompleted,
     AnswerGrounded,
-    TranslationCompleted,
     AudioResponseReady,
     PipelineFallback,
 )
+from domain.voice.events import TranslationCompleted
 from domain.voice.events import AudioSynthesized
 
 
