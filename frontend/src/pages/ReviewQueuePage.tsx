@@ -1,72 +1,89 @@
 import { useState, useEffect } from 'react'
-import {
-  ClipboardCheck,
-  CheckCircle2,
-  XCircle,
-  ChevronDown,
-  ChevronRight,
-  Shield,
-  Filter,
-  RefreshCw,
-  UserCheck,
-} from 'lucide-react'
-import { StatusBadge } from '@/shared/ui/StatusBadge'
-import { PageShell } from './ConsolePage'
+import { fetchApi } from '@/shared/api/client'
 import { useRole } from '@/shared/lib/roles'
-import {
-  getSubmissions,
-  approveSubmission,
-  rejectSubmission,
-} from '@/entities/knowledge/api/knowledgeApi'
-import type { SubmissionItem } from '@/entities/knowledge/model/types'
+import { StatusBadge, type StatusValue } from '@/shared/ui/StatusBadge'
+import { RuleResultChecklist, type RuleResult } from '@/shared/ui/RuleResultChecklist'
+import { Loader2, AlertCircle, ChevronDown, ChevronRight, CheckCircle, XCircle, ClipboardCheck } from 'lucide-react'
+import { PageShell } from './ConsolePage'
+
+interface SubmissionList {
+  id: string
+  submitted_by: string
+  submitter_role: string
+  raw_content: string
+  status: string
+  created_at: string
+}
+
+interface SubmissionDetail extends SubmissionList {
+  rule_results: RuleResult[]
+  reviewed_by: string | null
+}
 
 export function ReviewQueuePage() {
   const { role } = useRole()
-  const [filter, setFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending')
-  const [submissions, setSubmissions] = useState<SubmissionItem[]>([])
-  const [loading, setLoading] = useState(false)
-  const [expandedItems, setExpandedItems] = useState<Record<string, boolean>>({})
-  const [rejectingId, setRejectingId] = useState<string | null>(null)
-  const [rejectReason, setRejectReason] = useState('')
-
-  const loadSubmissions = async () => {
-    if (role !== 'captain') return
-    setLoading(true)
-    try {
-      const data = await getSubmissions(filter, role)
-      setSubmissions(data.submissions)
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to fetch review queue')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const [submissions, setSubmissions] = useState<SubmissionList[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [details, setDetails] = useState<Record<string, SubmissionDetail>>({})
+  const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>({})
 
   useEffect(() => {
-    loadSubmissions()
-  }, [filter, role])
+    if (role !== 'captain') {
+      setIsLoading(false)
+      return
+    }
 
-  const toggleExpand = (id: string) => {
-    setExpandedItems((prev) => ({ ...prev, [id]: !prev[id] }))
-  }
+    const loadQueue = async () => {
+      setIsLoading(true)
+      try {
+        const data = await fetchApi<{ submissions: SubmissionList[] }>('/api/v1/knowledge/submissions?status=pending', { role })
+        setSubmissions(data.submissions || [])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to load queue')
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    
+    loadQueue()
+  }, [role])
 
-  const handleApprove = async (id: string) => {
-    try {
-      await approveSubmission(id, 'captain-main', role)
-      loadSubmissions()
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Approve failed')
+  const toggleExpand = async (id: string) => {
+    if (expandedId === id) {
+      setExpandedId(null)
+      return
+    }
+    
+    setExpandedId(id)
+    
+    if (!details[id]) {
+      setLoadingDetails(prev => ({ ...prev, [id]: true }))
+      try {
+        const data = await fetchApi<SubmissionDetail>(`/api/v1/knowledge/submissions/${id}`, { role })
+        setDetails(prev => ({ ...prev, [id]: data }))
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setLoadingDetails(prev => ({ ...prev, [id]: false }))
+      }
     }
   }
 
-  const handleRejectSubmit = async (id: string) => {
+  const handleAction = async (id: string, action: 'approve' | 'reject') => {
     try {
-      await rejectSubmission(id, 'captain-main', rejectReason, role)
-      setRejectingId(null)
-      setRejectReason('')
-      loadSubmissions()
-    } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Reject failed')
+      await fetchApi(`/api/v1/knowledge/submissions/${id}/${action}`, {
+        method: 'POST',
+        role,
+        body: JSON.stringify({ reviewed_by: 'captain-frontend' })
+      })
+      
+      setSubmissions(prev => prev.filter(s => s.id !== id))
+      if (expandedId === id) setExpandedId(null)
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Action failed')
     }
   }
 
@@ -76,17 +93,12 @@ export function ReviewQueuePage() {
         icon={ClipboardCheck}
         title="Review Queue"
         label="CAPTAIN KNOWLEDGE CURATION"
-        badge={<StatusBadge status="failed" size="sm" />}
       >
-        <div className="panel p-8 text-center space-y-4">
-          <Shield className="h-8 w-8 text-amber mx-auto" />
-          <div className="space-y-1">
-            <h2 className="text-base font-semibold text-text-primary">
-              Captain Role Required
-            </h2>
-            <p className="text-text-secondary text-sm max-w-md mx-auto">
-              The Knowledge Base Review Queue is restricted to system Captains. Switch your role using the header selector to review pending submissions.
-            </p>
+        <div className="p-6 flex items-center justify-center h-full">
+          <div className="text-center space-y-3">
+            <AlertCircle className="h-10 w-10 text-rose mx-auto" />
+            <h2 className="text-lg font-medium text-text-primary">Access Denied</h2>
+            <p className="text-sm text-text-secondary">Only Captains can access the review queue.</p>
           </div>
         </div>
       </PageShell>
@@ -98,171 +110,86 @@ export function ReviewQueuePage() {
       icon={ClipboardCheck}
       title="Review Queue"
       label="CAPTAIN KNOWLEDGE CURATION"
-      badge={
-        <span className="mono text-xs px-2 py-0.5 rounded bg-amber/10 border border-amber/30 text-amber font-semibold">
-          CAPTAIN ACCESS
-        </span>
-      }
     >
-      <div className="space-y-4 animate-fade-in">
-        {/* Controls Bar */}
-        <div className="panel p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-base-800">
-          <div className="flex items-center gap-1">
-            <Filter className="h-3.5 w-3.5 text-text-muted mr-1 ml-1" />
-            {(['pending', 'approved', 'rejected', 'all'] as const).map((st) => (
-              <button
-                key={st}
-                onClick={() => setFilter(st)}
-                className={`px-3 py-1 rounded text-xs capitalize transition-colors ${
-                  filter === st
-                    ? 'bg-amber/20 border border-amber/40 text-amber font-medium'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-base-700'
-                }`}
-              >
-                {st}
-              </button>
+      <div className="p-6 max-w-4xl mx-auto space-y-6">
+        <div className="space-y-1">
+          <p className="text-sm text-text-secondary">Review pending knowledge submissions from the crew and guests.</p>
+        </div>
+
+        {isLoading ? (
+          <div className="flex items-center justify-center p-12">
+            <Loader2 className="h-6 w-6 animate-spin text-amber" />
+          </div>
+        ) : error ? (
+          <div className="p-4 rounded-sm bg-rose/10 border border-rose/30 text-rose text-sm">
+            {error}
+          </div>
+        ) : submissions.length === 0 ? (
+          <div className="p-12 text-center border border-dashed border-border-subtle rounded-sm bg-base-800/50">
+            <p className="text-text-muted text-sm">No pending submissions in the queue.</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {submissions.map(sub => (
+              <div key={sub.id} className="border border-border bg-base-800 rounded-sm overflow-hidden">
+                <div 
+                  className="p-4 flex items-center justify-between cursor-pointer hover:bg-base-700 transition-colors"
+                  onClick={() => toggleExpand(sub.id)}
+                >
+                  <div className="flex items-center gap-4">
+                    {expandedId === sub.id ? <ChevronDown className="h-4 w-4 text-text-muted" /> : <ChevronRight className="h-4 w-4 text-text-muted" />}
+                    <div className="space-y-1">
+                      <div className="text-sm font-medium text-text-primary line-clamp-1">{sub.raw_content}</div>
+                      <div className="flex items-center gap-3 text-xs text-text-muted mono">
+                        <span>By: {sub.submitted_by} ({sub.submitter_role})</span>
+                        <span>•</span>
+                        <span>{new Date(sub.created_at).toLocaleString()}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <StatusBadge status={sub.status as StatusValue} />
+                </div>
+
+                {expandedId === sub.id && (
+                  <div className="p-4 border-t border-border-subtle bg-base-900/50 space-y-6">
+                    <div>
+                      <h3 className="label-caps mb-2">Raw Content</h3>
+                      <div className="p-3 bg-base-800 border border-border rounded-sm text-sm text-text-primary whitespace-pre-wrap font-sans">
+                        {sub.raw_content}
+                      </div>
+                    </div>
+
+                    {loadingDetails[sub.id] ? (
+                      <div className="flex items-center gap-2 text-text-muted text-sm">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Loading rules...
+                      </div>
+                    ) : details[sub.id] ? (
+                      <div>
+                        <h3 className="label-caps mb-2">Rule Evaluation</h3>
+                        <RuleResultChecklist results={details[sub.id].rule_results} />
+                      </div>
+                    ) : null}
+
+                    <div className="flex items-center justify-end gap-3 pt-2">
+                      <button
+                        onClick={() => handleAction(sub.id, 'reject')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-rose/30 text-rose hover:bg-rose/10 rounded-sm text-sm font-medium transition-colors"
+                      >
+                        <XCircle className="h-4 w-4" /> Reject
+                      </button>
+                      <button
+                        onClick={() => handleAction(sub.id, 'approve')}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald hover:bg-emerald/90 text-base-900 rounded-sm text-sm font-bold transition-colors"
+                      >
+                        <CheckCircle className="h-4 w-4" /> Approve
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
-
-          <button
-            onClick={loadSubmissions}
-            disabled={loading}
-            className="btn-secondary text-xs"
-            title="Refresh List"
-          >
-            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Queue
-          </button>
-        </div>
-
-        {/* Submissions List */}
-        <div className="space-y-3">
-          {submissions.length === 0 ? (
-            <div className="panel p-8 text-center text-text-muted text-sm">
-              No submissions found for status filter <strong className="text-amber">"{filter}"</strong>.
-            </div>
-          ) : (
-            submissions.map((item) => {
-              const isExpanded = !!expandedItems[item.id]
-              const isPending = item.status === 'pending'
-
-              return (
-                <div key={item.id} className="panel p-4 space-y-3 bg-base-800/90 border border-border">
-                  {/* Header */}
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-border-subtle">
-                    <div className="flex items-center gap-2">
-                      <span className="mono text-xs font-semibold text-amber">{item.id}</span>
-                      <span className="mono text-[10px] px-1.5 py-0.5 rounded bg-base-700 text-text-secondary border border-border">
-                        Role: {item.submitter_role}
-                      </span>
-                      <StatusBadge status={item.status} size="sm" />
-                    </div>
-
-                    <div className="flex items-center gap-2 text-text-muted text-[11px] mono">
-                      <UserCheck className="h-3 w-3 text-text-muted" />
-                      <span>{item.submitted_by}</span>
-                      <span>•</span>
-                      <span>{new Date(item.created_at).toLocaleTimeString()}</span>
-                    </div>
-                  </div>
-
-                  {/* Raw Content Quote Box */}
-                  <div className="p-3 rounded bg-base-900 border border-border text-xs text-text-primary leading-relaxed font-sans">
-                    "{item.raw_content}"
-                  </div>
-
-                  {/* Rule Results Toggle */}
-                  {item.rule_results && item.rule_results.length > 0 && (
-                    <div className="space-y-2">
-                      <button
-                        onClick={() => toggleExpand(item.id)}
-                        className="flex items-center gap-1.5 text-xs text-amber font-mono hover:underline"
-                      >
-                        {isExpanded ? (
-                          <ChevronDown className="h-3.5 w-3.5" />
-                        ) : (
-                          <ChevronRight className="h-3.5 w-3.5" />
-                        )}
-                        Rule Engine Evaluation ({item.rule_results.length} checks)
-                      </button>
-
-                      {isExpanded && (
-                        <div className="grid gap-2 sm:grid-cols-2 pt-1 animate-fade-in">
-                          {item.rule_results.map((r, i) => (
-                            <div
-                              key={i}
-                              className="p-2 rounded bg-base-900/80 border border-border text-[11px] flex items-center gap-2"
-                            >
-                              {r.outcome === 'pass' ? (
-                                <CheckCircle2 className="h-3.5 w-3.5 text-emerald flex-shrink-0" />
-                              ) : (
-                                <XCircle className="h-3.5 w-3.5 text-rose flex-shrink-0" />
-                              )}
-                              <div className="space-y-0.5 min-w-0">
-                                <span className="mono font-semibold text-text-primary">{r.rule}</span>
-                                {r.details && (
-                                  <p className="text-text-secondary truncate text-[10px]">
-                                    {r.details}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Actions for Pending Submissions */}
-                  {isPending && (
-                    <div className="pt-2 border-t border-border-subtle flex items-center justify-end gap-2">
-                      {rejectingId === item.id ? (
-                        <div className="flex items-center gap-2 w-full max-w-md">
-                          <input
-                            type="text"
-                            value={rejectReason}
-                            onChange={(e) => setRejectReason(e.target.value)}
-                            placeholder="Reason for rejection..."
-                            className="input-field text-xs flex-1"
-                          />
-                          <button
-                            onClick={() => handleRejectSubmit(item.id)}
-                            className="btn-primary bg-rose hover:bg-rose/80 text-white text-xs py-1"
-                          >
-                            Confirm Reject
-                          </button>
-                          <button
-                            onClick={() => setRejectingId(null)}
-                            className="btn-secondary text-xs py-1"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
-                        <>
-                          <button
-                            onClick={() => setRejectingId(item.id)}
-                            className="btn-secondary text-xs border-rose/30 text-rose hover:bg-rose/10"
-                          >
-                            <XCircle className="h-3.5 w-3.5" />
-                            Reject Proposal
-                          </button>
-                          <button
-                            onClick={() => handleApprove(item.id)}
-                            className="btn-primary text-xs"
-                          >
-                            <CheckCircle2 className="h-3.5 w-3.5" />
-                            Approve & Index
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )
-            })
-          )}
-        </div>
+        )}
       </div>
     </PageShell>
   )

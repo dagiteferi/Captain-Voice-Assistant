@@ -1,4 +1,4 @@
-import { Anchor, Users, UserX } from 'lucide-react'
+import { Anchor, Users, UserX, AlertTriangle } from 'lucide-react'
 import { type UserRole, ROLE_META, useRole } from '@/shared/lib/roles'
 import { cn } from '@/shared/lib/cn'
 
@@ -48,36 +48,43 @@ export function RoleSwitcher() {
   const roles: UserRole[] = ['captain', 'crew', 'guest']
 
   return (
-    <div className="flex items-center gap-1 rounded-sm bg-base-700 border border-border p-0.5">
-      {roles.map((r) => {
-        const Icon = ROLE_ICONS[r]
-        const isActive = role === r
-        const activeColors: Record<UserRole, string> = {
-          captain: 'bg-amber/15 text-amber border-amber/30',
-          crew: 'bg-sky/15 text-sky border-sky/30',
-          guest: 'bg-slate/15 text-slate border-slate/30',
-        }
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase font-bold tracking-wider text-amber bg-amber/10 rounded-sm border border-amber/30">
+        <AlertTriangle className="h-3 w-3" />
+        <span className="hidden sm:inline">DEV AUTH</span>
+      </div>
+      <div className="flex items-center gap-1 rounded-sm bg-base-700 border border-border p-0.5">
+        {roles.map((r) => {
+          const Icon = ROLE_ICONS[r]
+          const isActive = role === r
+          const activeColors: Record<UserRole, string> = {
+            captain: 'bg-amber/15 text-amber border-amber/30',
+            crew: 'bg-sky/15 text-sky border-sky/30',
+            guest: 'bg-slate/15 text-slate border-slate/30',
+          }
 
-        return (
-          <button
-            key={r}
-            onClick={() => setRole(r)}
-            title={ROLE_META[r].description}
-            className={cn(
-              'flex items-center gap-1.5 px-2.5 py-1 rounded-[2px] border transition-all duration-150',
-              'text-xs font-medium',
-              isActive
-                ? activeColors[r]
-                : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-base-600',
-            )}
-          >
-            <Icon className="h-3 w-3" />
-            <span className="hidden sm:inline mono tracking-wider uppercase" style={{ fontSize: 10 }}>
-              {r}
-            </span>
-          </button>
-        )
-      })}
+          return (
+            <button
+              key={r}
+              onClick={() => setRole(r)}
+              title={ROLE_META[r].description}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1 rounded-[2px] border transition-all duration-150',
+                'text-xs font-medium',
+                isActive
+                  ? activeColors[r]
+                  : 'border-transparent text-text-secondary hover:text-text-primary hover:bg-base-600',
+              )}
+            >
+              <Icon className="h-3 w-3" />
+              <span className="hidden sm:inline mono tracking-wider uppercase" style={{ fontSize: 10 }}>
+                {r}
+              </span>
+            </button>
+          )
+        })}
+      </div>
     </div>
   )
 }
+

@@ -18,60 +18,14 @@ import type { CommandResponse } from '@/entities/command/model/types'
 export function ConsolePage() {
   const { role } = useRole()
   const [inputText, setInputText] = useState('')
-  const [targetLanguage, setTargetLanguage] = useState('am')
+  const [targetLanguage, setTargetLanguage] = useState(
+    import.meta.env.VITE_DEFAULT_LANGUAGE || 'am'
+  )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentStage, setCurrentStage] = useState<number>(-1)
-  const [activeCommand, setActiveCommand] = useState<CommandResponse | null>({
-    command_id: 'cmd-101',
-    conversation_id: 'conv-8842',
-    status: 'grounded',
-    input_text: 'What are the emergency engine shutdown procedures for Vessel Alpha?',
-    answer_text:
-      'To execute an emergency engine shutdown on Vessel Alpha: 1. Disengage main throttle control immediately. 2. Activate emergency fuel cut-off valve located on Panel B-2. 3. Engage secondary hydraulic brake. 4. Notify bridge control via VHF Channel 16.',
-    citations: [
-      {
-        chunk_id: 'chk-301',
-        document_title: 'Vessel Alpha Standard Operating Procedures (SOP-2024)',
-        similarity_score: 0.94,
-      },
-      {
-        chunk_id: 'chk-112',
-        document_title: 'Engine Room Safety Protocols Manual v3.2',
-        similarity_score: 0.88,
-      },
-    ],
-    translated_text:
-      'ለመርከብ አልፋ የአደጋ ጊዜ ሞተር ማጥፊያ ሂደቶች፡ 1. ዋናውን የመሪ መቆጣጠሪያ ወዲያውኑ ያላቅቁ። 2. በፓነል B-2 ላይ የሚገኘውን የአደጋ ጊዜ ነዳጅ ማቋረጫ ቫልቭ ያንቀሳቅሱ። 3. ሁለተኛ ደረጃ ሃይድሮሊክ ብሬክን ያሳትፉ። 4. በVHF ቻናል 16 በኩል ለብሪጅ መቆጣጠሪያ ያሳውቁ።',
-    target_language: 'am',
-    audio_url: '/api/v1/audio/aud-101',
-    created_at: new Date(Date.now() - 120000).toISOString(),
-    completed_at: new Date(Date.now() - 116000).toISOString(),
-  })
-
-  const [historyList, setHistoryList] = useState<CommandResponse[]>([
-    activeCommand!,
-    {
-      command_id: 'cmd-102',
-      conversation_id: 'conv-8842',
-      status: 'ungrounded',
-      input_text: 'What is the maximum speed limit in international waters near sector 7?',
-      answer_text:
-        'No specific rule found in indexed maritime regulations for sector 7 maximum speed limits. Default international maritime guidelines recommend safe speed based on visibility and traffic density (COLREGs Rule 6).',
-      citations: [
-        {
-          chunk_id: 'chk-099',
-          document_title: 'International Regulations for Preventing Collisions at Sea (COLREGs)',
-          similarity_score: 0.61,
-        },
-      ],
-      translated_text:
-        'በሴክተር 7 አቅራቢያ በዓለም አቀፍ ውቅያኖስ ላይ ስለሚፈቀደው ከፍተኛ ፍጥነት የተወሰነ ህግ አልተገኘም።',
-      target_language: 'am',
-      audio_url: null,
-      created_at: new Date(Date.now() - 600000).toISOString(),
-      completed_at: new Date(Date.now() - 597000).toISOString(),
-    },
-  ])
+  const [activeCommand, setActiveCommand] = useState<CommandResponse | null>(null)
+  const [historyList, setHistoryList] = useState<CommandResponse[]>([])
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
   if (role === 'guest') {
     return (
@@ -97,6 +51,7 @@ export function ConsolePage() {
     if (!inputText.trim() || isSubmitting) return
 
     setIsSubmitting(true)
+    setErrorMsg(null)
     setCurrentStage(0) // Retrieving
 
     try {
@@ -108,23 +63,38 @@ export function ConsolePage() {
         role,
       )
 
-      // Step through stages visually
-      setTimeout(() => setCurrentStage(1), 500) // Grounding
-      setTimeout(() => setCurrentStage(2), 1000) // Translating
-      setTimeout(() => setCurrentStage(3), 1500) // Synthesizing
+      // Poll real backend for command completion (2s intervals, up to 60 attempts = 2 min)
+      let attempts = 0
+      const pollTimer = setInterval(async () => {
+        attempts++
+        if (attempts <= 3) setCurrentStage(0)  // Retrieving
+        else if (attempts <= 8) setCurrentStage(1) // Grounding
+        else if (attempts <= 15) setCurrentStage(2) // Translating
+        else setCurrentStage(3) // Synthesizing
 
-      setTimeout(async () => {
-        const fullCmd = await getCommand(res.command_id, role)
-        setActiveCommand(fullCmd)
-        setHistoryList((prev) => [fullCmd, ...prev])
-        setIsSubmitting(false)
-        setCurrentStage(-1)
-        setInputText('')
+        try {
+          const fullCmd = await getCommand(res.command_id, role)
+          if (fullCmd.status !== 'pending' || attempts >= 60) {
+            clearInterval(pollTimer)
+            setActiveCommand(fullCmd)
+            setHistoryList((prev) => [fullCmd, ...prev.filter((c) => c.command_id !== fullCmd.command_id)])
+            setIsSubmitting(false)
+            setCurrentStage(-1)
+            setInputText('')
+          }
+        } catch (err: unknown) {
+          if (attempts >= 60) {
+            clearInterval(pollTimer)
+            setIsSubmitting(false)
+            setCurrentStage(-1)
+            setErrorMsg(err instanceof Error ? err.message : 'Polling failed')
+          }
+        }
       }, 2000)
     } catch (err: unknown) {
       setIsSubmitting(false)
       setCurrentStage(-1)
-      alert(err instanceof Error ? err.message : 'Command submission failed')
+      setErrorMsg(err instanceof Error ? err.message : 'Command submission failed')
     }
   }
 
@@ -144,6 +114,17 @@ export function ConsolePage() {
       }
     >
       <div className="space-y-4 animate-fade-in">
+        {/* Error Alert if real API call fails */}
+        {errorMsg && (
+          <div className="p-4 rounded-sm bg-rose/10 border border-rose/30 flex items-start gap-3">
+            <Sparkles className="h-5 w-5 text-rose flex-shrink-0" />
+            <div className="space-y-1">
+              <h3 className="text-sm font-semibold text-rose">Command Execution Failed</h3>
+              <p className="text-xs text-rose/80 font-mono">{errorMsg}</p>
+            </div>
+          </div>
+        )}
+
         {/* Command Form Panel */}
         <div className="panel p-4 space-y-3 border-l-2 border-l-amber">
           <div className="flex items-center justify-between">
@@ -152,7 +133,7 @@ export function ConsolePage() {
               <p className="label-caps">Submit Voice / Text Command</p>
             </div>
             <span className="mono text-[11px] text-text-muted">
-              Role: <span className="text-amber uppercase">{role}</span>
+              Role Header: <span className="text-amber uppercase font-semibold">{role}</span>
             </span>
           </div>
 
@@ -169,7 +150,7 @@ export function ConsolePage() {
                 type="button"
                 onClick={() =>
                   setInputText(
-                    'What are the emergency fuel cut-off valve procedures for Engine Room 2?',
+                    'What are the emergency engine shutdown procedures for Vessel Alpha?',
                   )
                 }
                 className="absolute right-3 top-3 p-1.5 rounded text-text-muted hover:text-amber transition-colors"
@@ -220,7 +201,7 @@ export function ConsolePage() {
           {/* Pipeline stage tracker during submission */}
           {isSubmitting && (
             <div className="pt-3 border-t border-border-subtle space-y-2">
-              <p className="label-caps text-sky">Pipeline Execution Active</p>
+              <p className="label-caps text-sky">Live Backend Pipeline Execution Active</p>
               <div className="flex items-center justify-between">
                 {stages.map((st, idx) => {
                   const isDone = idx < currentStage
@@ -256,14 +237,13 @@ export function ConsolePage() {
         </div>
 
         {/* Active Response Display */}
-        {activeCommand && (
+        {activeCommand ? (
           <div className="panel p-5 space-y-4">
-            {/* Header / Query */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
               <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <span className="mono text-xs text-text-muted">
-                    {activeCommand.command_id}
+                  <span className="mono text-xs text-text-muted font-mono">
+                    ID: {activeCommand.command_id}
                   </span>
                   <StatusBadge status={activeCommand.status} />
                 </div>
@@ -280,7 +260,7 @@ export function ConsolePage() {
             <div className="space-y-2">
               <p className="label-caps">Grounded Response</p>
               <div className="p-3.5 rounded bg-base-900 border border-border text-sm text-text-primary leading-relaxed">
-                {activeCommand.answer_text}
+                {activeCommand.answer_text || 'No answer returned by pipeline.'}
               </div>
             </div>
 
@@ -306,7 +286,7 @@ export function ConsolePage() {
                         </p>
                       </div>
                       <span className="mono text-[11px] px-1.5 py-0.5 rounded bg-amber/10 border border-amber/30 text-amber font-medium">
-                        {(c.similarity_score * 100).toFixed(0)}% sim
+                        {c.similarity_score != null ? `${(c.similarity_score * 100).toFixed(0)}%` : '–'} sim
                       </span>
                     </div>
                   ))}
@@ -335,42 +315,50 @@ export function ConsolePage() {
               />
             </div>
           </div>
+        ) : (
+          <div className="panel p-12 text-center border border-dashed border-border-subtle bg-base-800/50 flex flex-col items-center justify-center gap-3">
+            <Terminal className="h-8 w-8 text-text-muted" />
+            <p className="text-text-muted text-sm font-medium">No command executed yet</p>
+            <p className="text-text-secondary text-xs max-w-sm">Submit a command above to see the real backend response and knowledge citations.</p>
+          </div>
         )}
 
         {/* History List */}
-        <div className="panel p-4 space-y-3">
-          <div className="flex items-center gap-2">
-            <History className="h-4 w-4 text-text-secondary" />
-            <p className="label-caps">Recent Command History</p>
-          </div>
+        {historyList.length > 0 && (
+          <div className="panel p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <History className="h-4 w-4 text-text-secondary" />
+              <p className="label-caps">Session Command History</p>
+            </div>
 
-          <div className="divide-y divide-border-subtle">
-            {historyList.map((item) => (
-              <div
-                key={item.command_id}
-                onClick={() => setActiveCommand(item)}
-                className={`py-2.5 px-2 rounded cursor-pointer transition-colors flex items-center justify-between gap-3 ${
-                  activeCommand?.command_id === item.command_id
-                    ? 'bg-base-700/60'
-                    : 'hover:bg-base-800'
-                }`}
-              >
-                <div className="space-y-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="mono text-[11px] text-text-muted">{item.command_id}</span>
-                    <StatusBadge status={item.status} size="sm" />
+            <div className="divide-y divide-border-subtle">
+              {historyList.map((item) => (
+                <div
+                  key={item.command_id}
+                  onClick={() => setActiveCommand(item)}
+                  className={`py-2.5 px-2 rounded cursor-pointer transition-colors flex items-center justify-between gap-3 ${
+                    activeCommand?.command_id === item.command_id
+                      ? 'bg-base-700/60'
+                      : 'hover:bg-base-800'
+                  }`}
+                >
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="mono text-[11px] text-text-muted">{item.command_id}</span>
+                      <StatusBadge status={item.status} size="sm" />
+                    </div>
+                    <p className="text-xs text-text-primary truncate font-medium">
+                      {item.input_text}
+                    </p>
                   </div>
-                  <p className="text-xs text-text-primary truncate font-medium">
-                    {item.input_text}
-                  </p>
+                  <span className="mono text-[10px] text-text-muted whitespace-nowrap">
+                    {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
                 </div>
-                <span className="mono text-[10px] text-text-muted whitespace-nowrap">
-                  {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                </span>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </PageShell>
   )
@@ -380,7 +368,7 @@ interface PageShellProps {
   icon: React.ComponentType<{ className?: string }>
   title: string
   label: string
-  badge: React.ReactNode
+  badge?: React.ReactNode
   children: React.ReactNode
 }
 

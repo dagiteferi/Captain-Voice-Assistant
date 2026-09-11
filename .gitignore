@@ -1,13 +1,42 @@
-.venv/
+# Python & Bytecode
 __pycache__/
 *.py[cod]
+*$py.class
+*.so
 .pytest_cache/
-docs/
-backend/data/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+env/
+backend/.venv/
+
+# Databases & Storage
 *.db
+*.sqlite
+*.sqlite3
+data/
+backend/data/
 chroma/
 
-# Environment variables
+# Node & Frontend
+node_modules/
+dist/
+.vite/
+.cache/
+
+# IDEs & Tools
+.idea/
+.vscode/
+.qodo/
+.DS_Store
+
+# Environment Files
 .env
 .env.*
 .env.local
