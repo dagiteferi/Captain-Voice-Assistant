@@ -168,17 +168,27 @@ class FlatLangGraphOrchestrator:
 
     async def _node_retrieve(self, state: PipelineState) -> dict:
         """Retrieve relevant chunks from vector store."""
-        from application.knowledge.retrieval import expand_search_queries
+        from application.knowledge.grounding import RETRIEVAL_UNAVAILABLE_REASON
+        from application.knowledge.retrieval import build_search_query
 
         state.retrieval_attempts += 1
-        merged: dict = {}
-        for query in expand_search_queries(state.command.input_text):
-            chunks = await self.vector_store_port.search(query, limit=8)
-            for chunk in chunks:
-                previous = merged.get(chunk.chunk_id)
-                if previous is None or chunk.similarity_score > previous.similarity_score:
-                    merged[chunk.chunk_id] = chunk
-        chunks = sorted(merged.values(), key=lambda item: item.similarity_score, reverse=True)[:12]
+        # One search, one embedding request. The store ranks the whole knowledge
+        # base against it, so extra phrasings bought recall we already had.
+        try:
+            chunks = await self.vector_store_port.search(
+                build_search_query(state.command.input_text),
+                limit=12,
+            )
+        except Exception as exc:
+            # Searching needs the embedding API. If that is down, the pipeline
+            # must report why rather than dying and leaving no trace at all.
+            logger.error("[retrieve] Search failed: %s", exc)
+            return {
+                "retrieved_chunks": [],
+                "retrieval_relevant": False,
+                "status": PipelineStatus.FAILED,
+                "fallback_reason": f"{RETRIEVAL_UNAVAILABLE_REASON}: {str(exc)[:240]}",
+            }
         state.retrieved_chunks = chunks
 
         event = RetrievalCompleted(
@@ -210,7 +220,7 @@ class FlatLangGraphOrchestrator:
         evidence = select_evidence_chunks(
             state.command.input_text,
             state.retrieved_chunks,
-            limit=4,
+            limit=3,
         )
         if not evidence:
             return {
@@ -232,15 +242,6 @@ class FlatLangGraphOrchestrator:
                 chunks=evidence,
                 system_prompt=system_prompt,
             )
-            if looks_like_refusal(answer_text) and len(evidence) > 1:
-                logger.warning(
-                    "[generate] Model refused despite retrieved docs; retrying with top evidence only."
-                )
-                answer_text = await self.llm_port.generate(
-                    query=build_generate_prompt(state.command.input_text, evidence[:2]),
-                    chunks=evidence[:2],
-                    system_prompt=system_prompt,
-                )
             if looks_like_refusal(answer_text):
                
                 logger.info(
@@ -256,7 +257,8 @@ class FlatLangGraphOrchestrator:
             return {
                 "grounded_answer": None,
                 "status": PipelineStatus.FAILED,
-                "fallback_reason": f"{LLM_UNAVAILABLE_REASON}: {exc}",
+                # Shown to the operator, so keep it to one readable sentence.
+                "fallback_reason": f"{LLM_UNAVAILABLE_REASON}: {str(exc)[:240]}",
             }
 
         citations = [Citation(chunk_id=c.chunk_id) for c in evidence]

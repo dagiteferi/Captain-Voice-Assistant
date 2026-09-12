@@ -14,11 +14,19 @@ from domain.knowledge.value_objects import (
 class MinMaxLengthRule:
     NAME = "MinMaxLengthRule"
 
+    # Below this there is no fact worth indexing. The upper bound is only a
+    # guard against a runaway upload: long documents are split into chunks at
+    # index time, so length alone is no reason to reject a real document.
+    MIN_CHARS = 20
+    MAX_CHARS = 200_000
+
     @staticmethod
     def evaluate(submission: KnowledgeSubmission) -> RuleOutcome:
-        l = len(submission.raw_content.strip())
-        if l < 20 or l > 4000:
-            return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.FAIL, reason="length_out_of_bounds")
+        length = len(submission.raw_content.strip())
+        if length < MinMaxLengthRule.MIN_CHARS:
+            return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.FAIL, reason="too_short")
+        if length > MinMaxLengthRule.MAX_CHARS:
+            return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.FAIL, reason="too_long")
         return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.PASS)
 
 
@@ -39,17 +47,23 @@ class BlocklistKeywordRule:
 class DuplicateSimilarityRule:
     NAME = "DuplicateSimilarityRule"
 
-    # thresholds: >=0.95 -> fail, 0.40-0.95 -> needs_review, <0.40 -> pass
+    # Resembling existing content never rejects a submission: a CV restated in
+    # a new document is still knowledge, and re-indexing replaces a submission's
+    # own chunks rather than duplicating them. High similarity is reported so a
+    # reviewer can judge it.
+    NEAR_DUPLICATE = 0.95
+    SIMILAR = 0.4
+
     @staticmethod
     def evaluate(submission: KnowledgeSubmission, similarity_fn: Callable[[KnowledgeSubmission], float] | None = None) -> RuleOutcome:
         sim = 0.0
         if similarity_fn is not None:
             sim = float(similarity_fn(submission))
 
-        if sim >= 0.95:
-            return RuleOutcome(rule_name=DuplicateSimilarityRule.NAME, verdict=RuleVerdict.FAIL, reason="near_duplicate")
-        if sim >= 0.4:
-            return RuleOutcome(rule_name=DuplicateSimilarityRule.NAME, verdict=RuleVerdict.NEEDS_REVIEW, reason="similarity_threshold",)
+        if sim >= DuplicateSimilarityRule.NEAR_DUPLICATE:
+            return RuleOutcome(rule_name=DuplicateSimilarityRule.NAME, verdict=RuleVerdict.NEEDS_REVIEW, reason="near_duplicate")
+        if sim >= DuplicateSimilarityRule.SIMILAR:
+            return RuleOutcome(rule_name=DuplicateSimilarityRule.NAME, verdict=RuleVerdict.NEEDS_REVIEW, reason="similarity_threshold")
         return RuleOutcome(rule_name=DuplicateSimilarityRule.NAME, verdict=RuleVerdict.PASS)
 
 

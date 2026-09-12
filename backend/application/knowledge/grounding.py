@@ -49,6 +49,9 @@ NO_ANSWER_REASON = "The knowledge base does not contain this fact"
 # model could not be reached to read it.
 LLM_UNAVAILABLE_REASON = "The language model is unavailable"
 
+# Searching needs the embedding API, which can fail independently of the model.
+RETRIEVAL_UNAVAILABLE_REASON = "The knowledge base could not be searched"
+
 # Retrieval always returns the top of a small KB, so a score floor is what
 # separates "evidence" from "the least unrelated passage we happen to have".
 MIN_EVIDENCE_SCORE = 0.15
@@ -88,10 +91,17 @@ def select_evidence_chunks(
     return relevant[: max(1, limit)]
 
 
+# Enough for any single knowledge entry, short of pasting a whole CV section.
+MAX_DOCUMENT_CHARS = 700
+
+
 def build_generate_prompt(query: str, chunks: Sequence[ChunkRef]) -> str:
     documents = []
     for index, chunk in enumerate(chunks, start=1):
-        documents.append(f"Document {index}:\n{strip_index_header(chunk.content)}")
+        body = strip_index_header(chunk.content)
+        if len(body) > MAX_DOCUMENT_CHARS:
+            body = body[:MAX_DOCUMENT_CHARS].rsplit(" ", 1)[0] + "..."
+        documents.append(f"Document {index}:\n{body}")
     joined = "\n\n".join(documents)
     return f"""Answer the question using the knowledge-base documents below.
 

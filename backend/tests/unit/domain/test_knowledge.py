@@ -68,10 +68,10 @@ def test_duplicate_rule_uses_similarity_fn() -> None:
         DuplicateSimilarityRule.evaluate(submission, similarity_fn=lambda _: 0.5).verdict
         is RuleVerdict.NEEDS_REVIEW
     )
-    assert (
-        DuplicateSimilarityRule.evaluate(submission, similarity_fn=lambda _: 0.99).verdict
-        is RuleVerdict.FAIL
-    )
+    # A near-duplicate is flagged for a reviewer, never rejected outright.
+    near_duplicate = DuplicateSimilarityRule.evaluate(submission, similarity_fn=lambda _: 0.99)
+    assert near_duplicate.verdict is RuleVerdict.NEEDS_REVIEW
+    assert near_duplicate.reason == "near_duplicate"
 
 
 def test_guest_never_auto_approves_even_when_checks_pass() -> None:

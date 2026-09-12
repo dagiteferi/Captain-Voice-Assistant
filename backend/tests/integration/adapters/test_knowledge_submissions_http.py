@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from config.di_container import DIContainer
+from tests.fakes import HashingEmbedder
 
 import main
 
@@ -18,7 +19,7 @@ async def test_submit_knowledge_endpoint():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
     await container.init_db()
 
     main._container = container
@@ -46,7 +47,7 @@ async def test_list_submissions_endpoint():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
     await container.init_db()
 
     main._container = container

@@ -57,11 +57,6 @@ def indexable_text(content: str, title: str | None = None) -> str:
     return f"{header}\n{content.strip()}"
 
 
-# Greetings carry almost no searchable text, so "hello" alone never matches a
-# knowledge entry written as "when you ask hi ...". Every greeting is therefore
-# also searched under one shared phrasing.
-GREETING_QUERY = "greeting hi hello how are you reply"
-
 _GREETING_WORDS = frozenset(
     {
         "hi",
@@ -117,25 +112,21 @@ def is_small_talk(query: str) -> bool:
     return all(token in _GREETING_WORDS for token in tokens)
 
 
-def expand_search_queries(query: str) -> list[str]:
+def build_search_query(query: str) -> str:
+    """The single string to embed for a question.
+
+    Every extra phrasing costs another embedding request, and the store already
+    pulls the whole knowledge base and reranks it lexically, so one well-formed
+    query is enough. Nicknames are rewritten in place rather than searched
+    separately, which keeps the rare-word signal that drives the lexical score.
+    """
     q = query.strip()
     if not q:
-        return []
-    if is_small_talk(q):
-        # Widening a greeting with the profile subject only drags in CV chunks.
-        return [q, GREETING_QUERY]
-    queries = [q]
+        return ""
     lowered = q.lower()
     if "dagi" in lowered and "dagmawi" not in lowered:
-        queries.append(re.sub(r"dagi", PROFILE_SUBJECT, q, flags=re.IGNORECASE))
-    tokens = [token for token in query_tokens(q) if token not in {"dagi", "dagmawi", "teferi"}]
-    if tokens:
-        queries.append(f"{PROFILE_SUBJECT} {' '.join(tokens)}")
-    seen: list[str] = []
-    for item in queries:
-        if item not in seen:
-            seen.append(item)
-    return seen
+        return re.sub(r"dagi", PROFILE_SUBJECT, q, flags=re.IGNORECASE)
+    return q
 
 
 def query_tokens(text: str) -> set[str]:
@@ -165,10 +156,27 @@ async def upsert_submission_chunk(
     vector_store: VectorStorePort,
     submission: KnowledgeSubmission,
     title: str | None = None,
-) -> None:
+) -> list[Chunk]:
+    """(Re-)index a submission, splitting a long document into chunks.
+
+    Every chunk is filed under the submission id, so re-indexing replaces the
+    previous version wholesale and deleting the submission removes all of it.
+    """
+    from domain.knowledge.chunking import split_content
+
     await vector_store.delete_by_document_id(submission.id)
-    chunk = Chunk(
-        document_id=submission.id,
-        content=indexable_text(submission.raw_content, title=title),
-    )
-    await vector_store.upsert(chunk)
+
+    parts = split_content(submission.raw_content) or [submission.raw_content.strip()]
+    chunks = [
+        Chunk(
+            document_id=submission.id,
+            # Each chunk carries the subject header so a fact stays findable by
+            # name even when it lands in the middle of a long document.
+            content=indexable_text(part, title=title),
+        )
+        for part in parts
+        if part.strip()
+    ]
+    for chunk in chunks:
+        await vector_store.upsert(chunk)
+    return chunks

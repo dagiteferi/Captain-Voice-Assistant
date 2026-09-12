@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from config.di_container import DIContainer
+from tests.fakes import HashingEmbedder
 from domain.knowledge.entities import KnowledgeSubmission
 from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
 
@@ -16,7 +17,7 @@ async def test_save_and_get_submission():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=tempfile.mkdtemp())
+    container = DIContainer(db_url=db_url, chroma_dir=tempfile.mkdtemp(), embedder=HashingEmbedder())
     await container.init_db()
 
     repository = container.conversation_repository
@@ -44,7 +45,7 @@ async def test_list_submissions_with_status_filter():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=tempfile.mkdtemp())
+    container = DIContainer(db_url=db_url, chroma_dir=tempfile.mkdtemp(), embedder=HashingEmbedder())
     await container.init_db()
 
     repository = container.conversation_repository

@@ -45,9 +45,9 @@ def test_duplicate_similarity_pass_and_needs_review_and_fail():
     r = DuplicateSimilarityRule.evaluate(s, similarity_fn=lambda _: 0.5)
     assert r.verdict.name == "NEEDS_REVIEW"
 
-    # similarity very high -> fail
+    # similarity very high -> flagged, but still accepted
     r = DuplicateSimilarityRule.evaluate(s, similarity_fn=lambda _: 0.99)
-    assert r.verdict.name == "FAIL"
+    assert r.verdict.name == "NEEDS_REVIEW"
 
 
 def test_trusted_role_autoapprove_and_outcomes():
@@ -69,3 +69,26 @@ def test_trusted_role_autoapprove_and_outcomes():
     s2 = make_submission("this has secret info")
     status, results = evaluate_submission(s2, SubmitterRole.CAPTAIN, similarity_fn=lambda _: 0.0)
     assert status == SubmissionStatus.REJECTED
+
+
+def test_long_document_is_accepted_and_a_captain_upload_is_approved():
+    """A whole PDF or CV is knowledge, not an oversized payload to reject."""
+    from domain.knowledge.rules import MinMaxLengthRule, evaluate_submission
+    from domain.knowledge.value_objects import SubmitterRole
+
+    long_doc = make_submission("Dagmawi Teferi worked on many projects. " * 500)
+    assert len(long_doc.raw_content) > 4000
+    assert MinMaxLengthRule.evaluate(long_doc).verdict.name == "PASS"
+
+    # Even when it closely resembles what is already indexed.
+    status, results = evaluate_submission(
+        long_doc, SubmitterRole.CAPTAIN, similarity_fn=lambda _: 1.0
+    )
+    assert status.value == "approved"
+    assert not any(r["outcome"] == "fail" for r in results)
+
+
+def test_content_below_the_minimum_is_still_rejected():
+    from domain.knowledge.rules import MinMaxLengthRule
+
+    assert MinMaxLengthRule.evaluate(make_submission("too short")).verdict.name == "FAIL"

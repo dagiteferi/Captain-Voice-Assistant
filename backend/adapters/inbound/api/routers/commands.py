@@ -37,9 +37,14 @@ async def _run_pipeline(command_id: UUID) -> None:
         return
     try:
         await container.orchestrator.execute(command)
-    except Exception:
+    except Exception as exc:
         command.mark_failed()
         await container.conversation_repository.save_command(command)
+        # Record why, so the caller sees a cause instead of a bare failure.
+        await container.conversation_repository.append_event(
+            command.id,
+            PipelineFallback(command_id=command.id, reason=f"Pipeline error: {str(exc)[:240]}"),
+        )
 
 
 @router.post("", status_code=status.HTTP_202_ACCEPTED)
