@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from domain.conversation.value_objects import (
+    AnswerKind,
     Citation,
     CommandStatus,
     Language,
@@ -17,6 +18,7 @@ class GroundedAnswer:
     answer_text: str
     citations: list[Citation]
     id: UUID = field(default_factory=uuid4)
+    kind: AnswerKind = AnswerKind.GROUNDED
 
     def __post_init__(self) -> None:
         self.validate()
@@ -24,7 +26,7 @@ class GroundedAnswer:
     def validate(self) -> None:
         if not self.answer_text.strip():
             raise UngroundedAnswerError("answer text is empty")
-        if not self.citations:
+        if self.kind is AnswerKind.GROUNDED and not self.citations:
             raise UngroundedAnswerError("a grounded answer must cite at least one chunk")
 
 

@@ -29,8 +29,12 @@ function withCacheBust(url: string | null | undefined): string | null {
 function displayText(command: CommandResponse): string {
   const text = command.translated_text || command.answer_text
   if (text) return text
-  if (command.status === 'ungrounded' || command.status === 'failed') {
-    return 'No grounded answer was found in the knowledge base. Add the fact in Knowledge, wait until it is Indexed, then ask again.'
+  if (command.status === 'failed') {
+    const detail = command.fallback_reason || 'The assistant could not complete this request.'
+    return `I could not answer this one. ${detail}`
+  }
+  if (command.status === 'ungrounded') {
+    return "I don't have that information in my knowledge base, so I won't guess. If the fact should be there, add it under Knowledge, wait until it shows as Indexed, then ask again."
   }
   return 'The assistant is still working, or the language model did not return text. Try the same question once more.'
 }

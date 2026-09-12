@@ -1,8 +1,8 @@
 from uuid import uuid4
 
 from application.knowledge.grounding import (
-    extractive_answer,
     looks_like_refusal,
+    small_talk_reply,
     select_evidence_chunks,
     strip_index_header,
 )
@@ -31,7 +31,16 @@ def test_strip_index_header_keeps_fact_text():
 
 def test_looks_like_refusal_detects_missing_info_replies():
     assert looks_like_refusal("The provided documents do not contain information about GPA.")
+    assert looks_like_refusal("His age is not stated in the knowledge base.")
+    assert looks_like_refusal("I don't have that information.")
     assert not looks_like_refusal("Dagmawi Teferi was born in 1999 in Adama.")
+
+
+def test_negation_about_the_subject_is_not_a_refusal():
+    # A genuinely negative answer must survive; only refusals about the
+    # source material should route the pipeline to fallback.
+    assert not looks_like_refusal("Dagmawi Teferi does not have a PhD.")
+    assert not looks_like_refusal("He doesn't have experience with Rust.")
 
 
 def test_select_evidence_prefers_matching_fact_over_generic_cv():
@@ -42,15 +51,19 @@ def test_select_evidence_prefers_matching_fact_over_generic_cv():
     assert "3.94" in selected[0].content
 
 
-def test_extractive_answer_returns_exact_kb_passage():
-    query = "when was dagi born"
-    chunks = [
-        _chunk("He developed RAG pipelines for finance.", 0.4),
-        _chunk(
-            "Subject: Dagmawi Teferi (also known as Dagi).\n\n"
-            "Dagmawi Teferi was born in 1999 in Adama.",
-            0.3,
-        ),
-    ]
-    answer = extractive_answer(query, chunks)
-    assert answer == "Dagmawi Teferi was born in 1999 in Adama."
+def test_select_evidence_drops_passages_below_the_relevance_floor():
+    strong = _chunk("Dagmawi Teferi earned GPA 3.94 at Unity University.", 0.62)
+    noise = _chunk("Unrelated note about shipping containers.", 0.02)
+    selected = select_evidence_chunks("what is dagmawi teferi GPA", [strong, noise], limit=4)
+    assert selected == [strong]
+
+
+def test_select_evidence_returns_nothing_when_all_passages_are_noise():
+    noise = [_chunk("Unrelated note about shipping containers.", 0.01)]
+    assert select_evidence_chunks("what is the GPA", noise) == []
+
+
+def test_small_talk_reply_greets_without_stating_facts():
+    greeting = small_talk_reply("hii")
+    assert "how are you" in greeting.lower()
+    assert small_talk_reply("how are you?").lower().startswith("i am fine")

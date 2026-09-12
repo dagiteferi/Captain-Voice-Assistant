@@ -4,6 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, st
 from pydantic import BaseModel
 
 from domain.conversation.entities import Command, Conversation
+from domain.conversation.events import PipelineFallback
 from domain.conversation.value_objects import Language
 
 router = APIRouter(prefix="/commands", tags=["commands"])
@@ -98,6 +99,7 @@ class GetCommandResponse(BaseModel):
     translated_text: str | None = None
     target_language: str
     audio_url: str | None = None
+    fallback_reason: str | None = None
     created_at: str
     completed_at: str | None = None
 
@@ -170,10 +172,16 @@ async def get_command(
                 audio_url = f"/api/v1/audio/{audio.id}"
 
     completed_at = None
+    fallback_reason = None
     if command.status.value != "pending":
         events = await repository.list_events(cmd_uuid)
         if events:
             completed_at = events[-1].occurred_at.isoformat()
+        # Tell the caller whether the fact is missing or the model was down.
+        for event in reversed(events):
+            if isinstance(event, PipelineFallback):
+                fallback_reason = event.reason
+                break
 
     return GetCommandResponse(
         command_id=command.id,
@@ -185,6 +193,7 @@ async def get_command(
         translated_text=translated_text,
         target_language=target_language,
         audio_url=audio_url,
+        fallback_reason=fallback_reason,
         created_at=command.created_at.isoformat(),
         completed_at=completed_at,
     )

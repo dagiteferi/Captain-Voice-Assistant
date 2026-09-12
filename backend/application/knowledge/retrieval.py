@@ -57,10 +57,73 @@ def indexable_text(content: str, title: str | None = None) -> str:
     return f"{header}\n{content.strip()}"
 
 
+# Greetings carry almost no searchable text, so "hello" alone never matches a
+# knowledge entry written as "when you ask hi ...". Every greeting is therefore
+# also searched under one shared phrasing.
+GREETING_QUERY = "greeting hi hello how are you reply"
+
+_GREETING_WORDS = frozenset(
+    {
+        "hi",
+        "hii",
+        "hiii",
+        "hey",
+        "heyy",
+        "hello",
+        "helo",
+        "hallo",
+        "yo",
+        "greetings",
+        "morning",
+        "afternoon",
+        "evening",
+        "selam",
+        "salam",
+        "tena",
+        "yistilign",
+        "there",
+        "you",
+        "u",
+        "good",
+        "day",
+    }
+)
+
+_SMALL_TALK_PHRASES = (
+    "how are you",
+    "how r u",
+    "how are u",
+    "how do you do",
+    "how is it going",
+    "how's it going",
+    "whats up",
+    "what's up",
+    "good morning",
+    "good afternoon",
+    "good evening",
+)
+
+
+def is_small_talk(query: str) -> bool:
+    """True for greetings and pleasantries rather than questions about facts."""
+    lowered = query.strip().lower().strip("?!.,")
+    if not lowered:
+        return False
+    if any(phrase in lowered for phrase in _SMALL_TALK_PHRASES):
+        return True
+    tokens = [m.group(0) for m in _WORD.finditer(lowered)]
+    if not tokens or len(tokens) > 3:
+        return False
+    return all(token in _GREETING_WORDS for token in tokens)
+
+
 def expand_search_queries(query: str) -> list[str]:
     q = query.strip()
     if not q:
         return []
+    if is_small_talk(q):
+        # Widening a greeting with the profile subject only drags in CV chunks.
+        return [q, GREETING_QUERY]
     queries = [q]
     lowered = q.lower()
     if "dagi" in lowered and "dagmawi" not in lowered:
@@ -90,7 +153,8 @@ def lexical_overlap_score(query: str, document: str) -> float:
     years_d = {t for t in d_tokens if t.isdigit() and len(t) == 4}
     if years_q & years_d:
         base += 0.25
-    birth_q = bool({"born", "birth", "birthday"} & q_tokens)
+    # "how old is he" must reach a passage that only says "born in 1999".
+    birth_q = bool({"born", "birth", "birthday", "age", "old", "aged"} & q_tokens)
     birth_d = bool({"born", "birth", "birthday", "birthplace"} & d_tokens) or bool(years_d)
     if birth_q and birth_d:
         base += 0.4

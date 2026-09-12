@@ -18,7 +18,7 @@ from application.ports.translator_port import TranslatorPort
 from application.ports.tts_port import TTSPort
 from application.ports.vector_store_port import VectorStorePort
 from domain.conversation.entities import Command, GroundedAnswer
-from domain.conversation.value_objects import Language, PipelineStatus, Citation
+from domain.conversation.value_objects import AnswerKind, Language, PipelineStatus, Citation
 from domain.voice.entities import AudioResponse, Translation, CAPTAIN_PRESET
 from domain.conversation.events import (
     RetrievalCompleted,
@@ -64,8 +64,14 @@ class FlatLangGraphOrchestrator:
         graph.add_node("translate", self._node_translate)
         graph.add_node("synthesize", self._node_synthesize)
         graph.add_node("fallback", self._node_fallback)
+        graph.add_node("smalltalk", self._node_smalltalk)
 
-        graph.set_entry_point("retrieve")
+        # A greeting is not a question about the knowledge base, so it skips
+        # retrieval instead of being answered with whatever passage ranks first.
+        graph.set_conditional_entry_point(self._route_entry)
+
+        # smalltalk → verify_ground (shares the translate/synthesize tail)
+        graph.add_edge("smalltalk", "verify_ground")
 
         # retrieve → grade_docs
         graph.add_edge("retrieve", "grade_docs")
@@ -142,6 +148,24 @@ class FlatLangGraphOrchestrator:
             fallback_reason=result.fallback_reason,
         )
 
+    def _route_entry(self, state: PipelineState) -> str:
+        from application.knowledge.retrieval import is_small_talk
+
+        return "smalltalk" if is_small_talk(state.command.input_text) else "retrieve"
+
+    async def _node_smalltalk(self, state: PipelineState) -> dict:
+        """Answer a greeting conversationally, citing nothing."""
+        from application.knowledge.grounding import small_talk_reply
+
+        logger.info("[smalltalk] Answering greeting %r conversationally.", state.command.input_text)
+        answer = GroundedAnswer(
+            command_id=state.command.id,
+            answer_text=small_talk_reply(state.command.input_text),
+            citations=[],
+            kind=AnswerKind.CONVERSATIONAL,
+        )
+        return {"grounded_answer": answer}
+
     async def _node_retrieve(self, state: PipelineState) -> dict:
         """Retrieve relevant chunks from vector store."""
         from application.knowledge.retrieval import expand_search_queries
@@ -176,8 +200,9 @@ class FlatLangGraphOrchestrator:
     async def _node_generate(self, state: PipelineState) -> dict:
         """Generate an answer grounded in retrieved chunks."""
         from application.knowledge.grounding import (
+            LLM_UNAVAILABLE_REASON,
+            NO_ANSWER_REASON,
             build_generate_prompt,
-            extractive_answer,
             looks_like_refusal,
             select_evidence_chunks,
         )
@@ -190,13 +215,15 @@ class FlatLangGraphOrchestrator:
         if not evidence:
             return {
                 "grounded_answer": None,
-                "fallback_reason": "No knowledge-base passages retrieved",
+                "fallback_reason": NO_ANSWER_REASON,
             }
 
         system_prompt = (
             "You answer strictly from the given knowledge-base documents. "
             "When a document has the answer, report those exact facts. "
-            "Never claim the information is missing if it appears in any document."
+            "Never claim the information is missing if it appears in any document. "
+            "When no document states the answer, say so plainly — never answer with a "
+            "different fact about the same subject."
         )
 
         try:
@@ -215,20 +242,22 @@ class FlatLangGraphOrchestrator:
                     system_prompt=system_prompt,
                 )
             if looks_like_refusal(answer_text):
-                extracted = extractive_answer(state.command.input_text, evidence)
-                if extracted:
-                    logger.info("[generate] Using exact knowledge-base passage after model refusal.")
-                    answer_text = extracted
-        except Exception as exc:
-            logger.error("[generate] LLM failed: %s", exc)
-            extracted = extractive_answer(state.command.input_text, evidence)
-            if extracted:
-                answer_text = extracted
-            else:
+               
+                logger.info(
+                    "[generate] Knowledge base has no answer for %r; falling back.",
+                    state.command.input_text,
+                )
                 return {
                     "grounded_answer": None,
-                    "fallback_reason": f"Answer generation failed: {exc}",
+                    "fallback_reason": NO_ANSWER_REASON,
                 }
+        except Exception as exc:
+            logger.error("[generate] LLM failed: %s", exc)
+            return {
+                "grounded_answer": None,
+                "status": PipelineStatus.FAILED,
+                "fallback_reason": f"{LLM_UNAVAILABLE_REASON}: {exc}",
+            }
 
         citations = [Citation(chunk_id=c.chunk_id) for c in evidence]
         grounded_answer = GroundedAnswer(
@@ -388,7 +417,12 @@ class FlatLangGraphOrchestrator:
     async def _node_fallback(self, state: PipelineState) -> dict:
         """Emit a fallback response when the pipeline fails."""
         reason = state.fallback_reason or "Unable to provide a grounded answer"
-        state.status = PipelineStatus.UNGROUNDED
+        status = (
+            PipelineStatus.FAILED
+            if state.status is PipelineStatus.FAILED
+            else PipelineStatus.UNGROUNDED
+        )
+        state.status = status
 
         event = PipelineFallback(
             command_id=state.command.id,
@@ -396,5 +430,5 @@ class FlatLangGraphOrchestrator:
         )
         state.events.append(event)
 
-        return {"status": PipelineStatus.UNGROUNDED, "fallback_reason": reason}
+        return {"status": status, "fallback_reason": reason}
 

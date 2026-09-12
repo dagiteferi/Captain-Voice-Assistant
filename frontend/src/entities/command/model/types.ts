@@ -16,6 +16,7 @@ export interface CommandResponse {
   translated_text: string | null
   target_language: string
   audio_url: string | null
+  fallback_reason: string | null
   created_at: string
   completed_at: string | null
 }

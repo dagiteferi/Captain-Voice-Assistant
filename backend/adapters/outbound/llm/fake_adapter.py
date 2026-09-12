@@ -22,6 +22,9 @@ class FakeLLMAdapter(LLMPort):
         if system_prompt and "relevance grader" in system_prompt.lower():
             return "RELEVANT"
 
-        # Simple grounded answer: include a sentence and the ids of chunks used
+        # Answer from the chunks only. Echoing the prompt back would make the
+        # reply contain the prompt's own "say you do not have it" wording, which
+        # the refusal check would then read as a refusal.
         chunk_ids = ", ".join(str(c.chunk_id) for c in chunks[:3])
-        return f"Answer (fake): Based on chunks [{chunk_ids}].\nQuery: {query}"
+        excerpt = chunks[0].content.strip().replace("\n", " ")[:200] if chunks else ""
+        return f"Answer (fake): {excerpt} [chunks: {chunk_ids}]"
