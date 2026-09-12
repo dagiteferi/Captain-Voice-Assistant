@@ -1,13 +1,39 @@
-# Captain Voice Assistant
+<div align="center">
 
-<p align="center">
-  <strong>RAG-Based Voice Assistant with Translation Pipeline</strong>
-</p>
+#  Captain Voice Assistant
 
-<p align="center">
-  A Captain inputs text commands → the system retrieves context from a knowledge base (RAG) →
-  generates a grounded response → translates it → converts to speech using a consistent voice profile.
-</p>
+**RAG-Based Voice Assistant with Translation Pipeline**
+
+A Captain inputs text commands → the system retrieves context from a knowledge base (RAG) →
+generates a grounded response → translates it → converts it to speech using a consistent voice profile.
+
+[![Python](https://img.shields.io/badge/Python-3.11%2B-blue)](https://python.org)
+[![Node](https://img.shields.io/badge/Node.js-18%2B-green)](https://nodejs.org)
+[![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688)](https://fastapi.tiangolo.com/)
+[![React](https://img.shields.io/badge/Frontend-React%20%2B%20Vite-61DAFB)](https://react.dev/)
+[![License](https://img.shields.io/badge/License-MIT-lightgrey)](#)
+
+📺 **Demo Video:** [Watch the walkthrough](https://drive.google.com/file/d/1AJsTvJ_38ONd_7nI00Hm9YBQIQF_WDRK/view?usp=sharing) &nbsp;•&nbsp; 📧 **Contact:** [dagiteferi2011@gmail.com](mailto:dagiteferi2011@gmail.com)
+
+</div>
+
+---
+
+## 📑 Table of Contents
+
+- [Architecture](#architecture)
+- [Pipeline Flow](#pipeline-flow)
+- [Tech Stack](#tech-stack)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Environment Variables](#environment-variables)
+- [API Endpoints](#api-endpoints)
+- [Demo](#demo)
+- [TTS Voice Tradeoff](#tts-voice-tradeoff)
+- [Known Limitations](#known-limitations)
+- [What I'd Improve With More Time](#what-id-improve-with-more-time)
+- [Project Structure](#project-structure)
+- [Author](#author)
 
 ---
 
@@ -68,10 +94,10 @@ User Command (text)
 | **Frontend** | React + Vite + Tailwind | — |
 
 **Why these choices:**
-- **Gemini**: Free tier is generous, excellent quality, same key for LLM + embeddings.
-- **MyMemory**: Completely free, no signup needed, supports English↔Amharic.
-- **Google Cloud TTS**: Free tier covers demo usage, excellent voice quality with Neural2 voices.
-- **No local model downloads**: All AI is API-based via `httpx` — fast startup, no GPU needed.
+- **Gemini** — Free tier is generous, excellent quality, same key for LLM + embeddings.
+- **MyMemory** — Completely free, no signup needed, supports English↔Amharic.
+- **Google Cloud TTS** — Free tier covers demo usage, excellent voice quality with Neural2 voices.
+- **No local model downloads** — All AI is API-based via `httpx`, giving fast startup with no GPU needed.
 
 ---
 
@@ -122,7 +148,7 @@ Stack: Gemini LLM + Gemini Embeddings + MyMemory Translate + Google TTS
 
 ### 4. Seed Knowledge Base
 
-In a separate terminal (with backend running):
+In a separate terminal (with the backend running):
 
 ```bash
 python tools/seed_knowledge.py
@@ -143,7 +169,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173 → type a command → get a grounded, translated voice response.
+Open **http://localhost:5173** → type a command → get a grounded, translated voice response.
 
 ---
 
@@ -152,10 +178,10 @@ Open http://localhost:5173 → type a command → get a grounded, translated voi
 ### Backend (`.env`)
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GEMINI_API_KEY` | **Yes** | — | Google AI Studio API key |
+|----------|:--------:|---------|-------------|
+| `GEMINI_API_KEY` | ✅ Yes | — | Google AI Studio API key |
 | `GEMINI_MODEL` | No | `gemini-2.0-flash` | Gemini model name |
-| `GOOGLE_TTS_API_KEY` | **Yes** | — | Google Cloud TTS API key |
+| `GOOGLE_TTS_API_KEY` | ✅ Yes | — | Google Cloud TTS API key |
 | `GOOGLE_TTS_VOICE_EN` | No | `en-US-Neural2-D` | English voice name |
 | `GOOGLE_TTS_VOICE_AM` | No | `am-ET-Standard-A` | Amharic voice name |
 | `MYMEMORY_EMAIL` | No | — | Optional: increases daily limit to 10,000 |
@@ -192,6 +218,16 @@ Open http://localhost:5173 → type a command → get a grounded, translated voi
 
 ---
 
+## Demo
+
+A short walkthrough (2–5 min) showing a text command going in and a voice response coming out:
+
+📺 **Video:** [demo video link ](https://drive.google.com/file/d/1AJsTvJ_38ONd_7nI00Hm9YBQIQF_WDRK/view?usp=sharing)
+
+
+
+---
+
 ## TTS Voice Tradeoff
 
 This project uses **Google Cloud TTS Neural2 voices** rather than true voice cloning
@@ -199,9 +235,9 @@ This project uses **Google Cloud TTS Neural2 voices** rather than true voice clo
 
 **Tradeoff:** A consistent, high-quality neural voice (`en-US-Neural2-D` for English,
 `am-ET-Standard-A` for Amharic) is used for all responses rather than a cloned
-Captain-specific voice. As the assignment notes: *"If true voice cloning isn't feasible
-in the time given, a well-configured single consistent voice profile is acceptable —
-explain the tradeoff in your README."*
+Captain-specific voice. As the assignment notes:
+
+> *"If true voice cloning isn't feasible in the time given, a well-configured single consistent voice profile is acceptable — explain the tradeoff in your README."*
 
 The pipeline architecture supports swapping in a real voice-cloning adapter at the
 `TTSPort` interface without changing any other code.
@@ -213,13 +249,15 @@ The pipeline architecture supports swapping in a real voice-cloning adapter at t
 1. **MyMemory translation** has a 1000 req/day free limit (10,000 with email).
 2. **Google TTS** free tier is 1M characters/month — fine for demo, not production.
 3. **Gemini free tier** is 15 RPM — sufficient for demo, rate-limit for concurrent users.
-4. **No voice cloning** — uses consistent Neural2 profile (see tradeoff above).
+4. **No voice cloning** — uses a consistent Neural2 profile (see tradeoff above).
 5. **ChromaDB** is an embedded vector store — for production, use a hosted solution.
+
+---
 
 ## What I'd Improve With More Time
 
 1. Add WebSocket/SSE for real-time pipeline progress (partial implementation exists).
-2. Implement true voice cloning with ElevenLabs API.
+2. Implement true voice cloning with the ElevenLabs API.
 3. Add user authentication (JWT).
 4. Deploy backend to Hugging Face Spaces, frontend to Vercel.
 5. Add comprehensive test coverage for all pipeline nodes.
@@ -262,6 +300,12 @@ captain-voice-assistant/
 
 ## Author
 
+<div align="center">
+
 **Dagmawi Teferi**
 
+📧 [dagiteferi2011@gmail.com](mailto:dagiteferi2011@gmail.com)
+
 Built for the Captain Voice Assistant technical assignment.
+
+</div>
