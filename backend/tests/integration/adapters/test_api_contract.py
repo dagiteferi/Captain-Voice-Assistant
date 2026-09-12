@@ -41,7 +41,10 @@ async def test_health_is_public(tmp_path) -> None:
     async with client:
         resp = await client.get("/api/v1/health")
         assert resp.status_code == 200
-        assert resp.json() == {"status": "ok", "version": "0.1.0"}
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["version"] == "0.1.0"
+        assert "stack" in data
     await container.close()
 
 

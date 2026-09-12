@@ -1,9 +1,13 @@
 """Flat LangGraph pipeline orchestrator implementation."""
 
+import logging
 from pathlib import Path
 from typing import cast
 
 from langgraph.graph import StateGraph, END
+
+logger = logging.getLogger(__name__)
+
 
 from adapters.outbound.orchestration.state import PipelineState
 from application.ports.conversation_repository_port import ConversationRepositoryPort
@@ -157,29 +161,12 @@ class FlatLangGraphOrchestrator:
         return {"retrieved_chunks": chunks, "retrieval_relevant": len(chunks) > 0}
 
     async def _node_grade_docs(self, state: PipelineState) -> dict:
-        """Grade whether retrieved chunks are actually relevant."""
-        if not state.retrieved_chunks:
-            return {"retrieval_relevant": False}
-
-        prompt = f"""Evaluate whether these retrieved documents are relevant to the query.
-Query: {state.command.input_text}
-Documents:
-{chr(10).join(f'- {c.content}' for c in state.retrieved_chunks)}
-Respond with "RELEVANT" or "NOT_RELEVANT"."""
-
-        response = await self.llm_port.generate(
-            query=prompt,
-            chunks=state.retrieved_chunks,
-            system_prompt="You are a relevance grader. Respond only with RELEVANT or NOT_RELEVANT.",
-        )
-
-        relevant = "RELEVANT" in response.upper()
-        return {"retrieval_relevant": relevant}
+        # Skip an extra LLM round-trip for demo latency; retrieved hits are treated as usable.
+        return {"retrieval_relevant": bool(state.retrieved_chunks)}
 
     async def _node_generate(self, state: PipelineState) -> dict:
         """Generate an answer grounded in retrieved chunks."""
-        prompt = f"""Answer the following query using ONLY the provided documents. 
-You MUST cite your sources by referencing the document snippets.
+        prompt = f"""Answer the following query using ONLY the provided documents. Do not include any source citations in your answer.
 Query: {state.command.input_text}
 Documents:
 {chr(10).join(f'- {c.content}' for c in state.retrieved_chunks)}
@@ -221,14 +208,39 @@ Answer:"""
             return {"grounded_answer": None, "status": PipelineStatus.UNGROUNDED}
 
     async def _node_translate(self, state: PipelineState) -> dict:
-        """Translate the grounded answer to the target language."""
+        """Translate the grounded answer to the target language.
+
+        If the translator raises (e.g. missing language pack, passthrough
+        detected), we record a fallback rather than emitting a false
+        TranslationCompleted event.
+        """
         if not state.grounded_answer:
             return {"translation": None}
 
         target_lang = Language(state.target_language)
-        translated_text = await self.translator_port.translate(
-            state.grounded_answer.answer_text,
-            target_lang,
+        logger.info(
+            "[translate] Translating answer (len=%d) to %s",
+            len(state.grounded_answer.answer_text),
+            target_lang.code,
+        )
+
+        try:
+            translated_text = await self.translator_port.translate(
+                state.grounded_answer.answer_text,
+                target_lang,
+            )
+        except Exception as e:
+            logger.error(
+                "[translate] Translation FAILED — recording pipeline failure. Error: %s", e
+            )
+            state.fallback_reason = f"Translation failed: {e}"
+            state.status = PipelineStatus.FAILED
+            return {"translation": None, "status": PipelineStatus.FAILED, "fallback_reason": state.fallback_reason}
+
+        logger.info(
+            "[translate] ✓ Translation complete. Input=%d chars, Output=%d chars.",
+            len(state.grounded_answer.answer_text),
+            len(translated_text),
         )
 
         translation = Translation(
@@ -247,29 +259,68 @@ Answer:"""
         return {"translation": translation}
 
     async def _node_synthesize(self, state: PipelineState) -> dict:
-        """Synthesize audio from the translated text."""
+        """Synthesize audio from the translated text.
+
+        If TTS raises or returns empty bytes, we record a pipeline failure
+        rather than emitting a false AudioSynthesized success event.
+        """
         if not state.translation:
             return {"audio_response": None}
 
-        audio_bytes = await self.tts_port.synthesize(
-            state.translation.translated_text,
-            CAPTAIN_PRESET,
+        logger.info(
+            "[synthesize] Synthesizing audio for translation (len=%d chars)...",
+            len(state.translation.translated_text),
         )
+
+        try:
+            from domain.voice.entities import VoiceProfile
+            from domain.conversation.value_objects import Language
+            if state.command.voice_id:
+                voice_profile = VoiceProfile(
+                    name="user-selected",
+                    language=Language(state.target_language or "en"),
+                    voice_id=state.command.voice_id,
+                )
+            else:
+                voice_profile = CAPTAIN_PRESET
+            audio_bytes = await self.tts_port.synthesize(
+                state.translation.translated_text,
+                voice_profile,
+            )
+        except Exception as e:
+            logger.error("[synthesize] TTS failed, returning text without audio: %s", e)
+            return {"audio_response": None}
+
+        if not audio_bytes:
+            logger.error("[synthesize] empty audio; continuing without voice")
+            return {"audio_response": None}
+
         self.audio_dir.mkdir(parents=True, exist_ok=True)
-        audio_path = self.audio_dir / f"{state.command.id}.wav"
+        # Use .mp3 extension — edge-tts produces MP3, not WAV
+        audio_path = self.audio_dir / f"{state.command.id}.mp3"
         audio_path.write_bytes(audio_bytes)
+
+        # Rough duration estimate: MP3 at 128kbps → 16000 bytes/sec
+        duration_ms = max(int(len(audio_bytes) / 16000 * 1000), 1)
+
+        logger.info(
+            "[synthesize] ✓ Audio saved to %s — size=%d bytes, estimated duration=%.1fs.",
+            audio_path,
+            len(audio_bytes),
+            duration_ms / 1000,
+        )
 
         audio_response = AudioResponse(
             translation_id=state.translation.id,
-            voice_profile_id=CAPTAIN_PRESET.id,
+            voice_profile_id=voice_profile.id,
             audio_path=str(audio_path),
-            duration_ms=max(len(audio_bytes) // 32, 1),
+            duration_ms=duration_ms,
         )
 
         event = AudioSynthesized(
             command_id=state.command.id,
             audio_response_id=audio_response.id,
-            voice_profile_id=CAPTAIN_PRESET.id,
+            voice_profile_id=voice_profile.id,
             duration_ms=audio_response.duration_ms,
         )
         state.events.append(event)

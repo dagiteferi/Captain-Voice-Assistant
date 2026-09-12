@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
-import { Play, Pause, Download, Volume2, VolumeX, Music } from 'lucide-react'
+import { Play, Pause, Download, Volume2, VolumeX, Music, Loader2, AlertCircle } from 'lucide-react'
 import { cn } from '@/shared/lib/cn'
+import { useAudioBlob } from '@/shared/api/useAudioBlob'
 
 interface AudioPlayerProps {
   audioUrl?: string | null
@@ -9,6 +10,7 @@ interface AudioPlayerProps {
 }
 
 export function AudioPlayer({ audioUrl, title = 'Audio Response', className }: AudioPlayerProps) {
+  const { blobUrl, isLoading, error } = useAudioBlob(audioUrl)
   const [isPlaying, setIsPlaying] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
@@ -19,13 +21,31 @@ export function AudioPlayer({ audioUrl, title = 'Audio Response', className }: A
     setIsPlaying(false)
     setCurrentTime(0)
     setDuration(0)
-  }, [audioUrl])
+  }, [blobUrl])
 
   if (!audioUrl) {
     return (
       <div className="flex items-center gap-2 p-2.5 rounded border border-border-subtle bg-base-800/50 text-text-muted text-xs">
         <Music className="h-3.5 w-3.5" />
         <span>No audio response synthesized</span>
+      </div>
+    )
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 p-2.5 rounded border border-border-subtle bg-base-800/50 text-text-muted text-xs">
+        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        <span>Loading audio...</span>
+      </div>
+    )
+  }
+
+  if (error || !blobUrl) {
+    return (
+      <div className="flex items-center gap-2 p-2.5 rounded border border-red-500/30 bg-red-500/10 text-red-400 text-xs">
+        <AlertCircle className="h-3.5 w-3.5" />
+        <span>Failed to load audio</span>
       </div>
     )
   }
@@ -63,7 +83,7 @@ export function AudioPlayer({ audioUrl, title = 'Audio Response', className }: A
     >
       <audio
         ref={audioRef}
-        src={audioUrl}
+        src={blobUrl}
         onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
         onLoadedMetadata={() => setDuration(audioRef.current?.duration || 0)}
         onEnded={() => setIsPlaying(false)}
@@ -119,7 +139,7 @@ export function AudioPlayer({ audioUrl, title = 'Audio Response', className }: A
         </button>
 
         <a
-          href={audioUrl}
+          href={blobUrl || undefined}
           download="captain-voice-response.mp3"
           className="p-1.5 text-text-secondary hover:text-amber transition-colors"
           title="Download Audio File"

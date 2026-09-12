@@ -75,11 +75,12 @@ class SubmitKnowledgeResponse(BaseModel):
     rule_results: list[RuleResultItem]
 
 
-@router.post("/submissions", status_code=status.HTTP_201_CREATED)
-async def submit_knowledge(
-    request: SubmitKnowledgeRequest,
+async def _process_and_save_submission(
+    submitted_by: str,
+    submitter_role_str: str,
+    raw_content: str,
+    title_prefix: str = "Submission",
 ) -> SubmitKnowledgeResponse:
-    """Propose new information for the knowledge base."""
     from main import get_container
     from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
     from domain.knowledge.value_objects import SubmitterRole
@@ -89,14 +90,14 @@ async def submit_knowledge(
     container = get_container()
     repository = container.conversation_repository
 
-    submitter_role = SubmitterRole(request.submitter_role)
+    submitter_role = SubmitterRole(submitter_role_str)
     submission = KnowledgeSubmission(
-        submitted_by=request.submitted_by,
+        submitted_by=submitted_by,
         submitter_role=submitter_role,
-        raw_content=request.raw_content,
+        raw_content=raw_content,
     )
 
-    hits = await container.vector_store.search(request.raw_content, limit=1)
+    hits = await container.vector_store.search(raw_content, limit=1)
     max_similarity = hits[0].similarity_score if hits else 0.0
     status_result, rule_results = evaluate_submission(
         submission,
@@ -109,7 +110,7 @@ async def submit_knowledge(
     if status_result.value == "approved":
         doc = Document(
             id=uuid4(),
-            title=f"Submission {submission.id}",
+            title=f"{title_prefix} {submission.id}",
             source_path=f"submissions/{submission.id}",
         )
         chunk = Chunk(document_id=doc.id, content=submission.raw_content)
@@ -123,6 +124,109 @@ async def submit_knowledge(
         status=status_result.value,
         rule_results=[RuleResultItem(**r) for r in rule_results],
     )
+
+
+@router.post("/submissions", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge(
+    request: SubmitKnowledgeRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 1: Propose raw text content for the knowledge base."""
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=request.raw_content,
+    )
+
+
+from fastapi import UploadFile, File, Form
+
+
+@router.post("/submissions/file", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_file(
+    file: UploadFile = File(...),
+    submitted_by: str = Form("Captain"),
+    submitter_role: str = Form("captain"),
+) -> SubmitKnowledgeResponse:
+    """Method 2: Upload file (PDF, Word, PPT, Text, CSV, JSON) to extract and propose knowledge."""
+    from application.knowledge.file_parser import extract_text_from_file
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        extracted_text = extract_text_from_file(file.filename or "file.txt", file_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    content_with_meta = f"# Source File: {file.filename}\n\n{extracted_text}"
+    return await _process_and_save_submission(
+        submitted_by=submitted_by,
+        submitter_role_str=submitter_role,
+        raw_content=content_with_meta,
+        title_prefix=f"File ({file.filename})",
+    )
+
+
+class SubmitUrlRequest(BaseModel):
+    submitted_by: str
+    submitter_role: str
+    url: str
+
+
+@router.post("/submissions/url", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_url(
+    request: SubmitUrlRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 3: Ingest knowledge from a web page / URL."""
+    from application.knowledge.file_parser import extract_text_from_url
+
+    try:
+        extracted_text = await extract_text_from_url(request.url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch content from URL: {e}")
+
+    content_with_meta = f"# Source URL: {request.url}\n\n{extracted_text}"
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=content_with_meta,
+        title_prefix=f"URL ({request.url})",
+    )
+
+
+class SubmitProcedureRequest(BaseModel):
+    submitted_by: str
+    submitter_role: str
+    title: str
+    category: str
+    severity: str
+    steps: list[str]
+    notes: str | None = None
+
+
+@router.post("/submissions/procedure", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_procedure(
+    request: SubmitProcedureRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 4: Propose a structured Standard Operating Procedure (SOP)."""
+    formatted_steps = "\n".join([f"{i+1}. {step}" for i, step in enumerate(request.steps) if step.strip()])
+    content = (
+        f"# SOP: {request.title}\n"
+        f"**Category:** {request.category} | **Severity Level:** {request.severity}\n\n"
+        f"## Standard Operating Steps:\n"
+        f"{formatted_steps}\n"
+    )
+    if request.notes:
+        content += f"\n## Operational Notes & Safety Warnings:\n{request.notes}\n"
+
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=content,
+        title_prefix=f"SOP ({request.title})",
+    )
+
 
 
 class SubmissionItem(BaseModel):
@@ -292,3 +396,186 @@ async def reject_submission(
     await repository.save_submission(submission)
 
     return RejectSubmissionResponse(id=submission.id, status=submission.status.value, reason=request.reason)
+
+
+class UpdateSubmissionRequest(BaseModel):
+    raw_content: str
+
+
+INITIAL_KNOWLEDGE_DOCS = [
+    {
+        "title": "Emergency Engine Shutdown Procedures",
+        "content": "Emergency Engine Shutdown Procedures: 1. Notify bridge immediately. 2. Press Emergency Stop button on MECP. 3. Close fuel supply valve counter-clockwise. 4. Activate emergency ventilation. 5. Engage turning gear for cooldown. 6. Log shutdown in Engine Log Book.",
+    },
+    {
+        "title": "Fire Safety Protocol",
+        "content": "Fire Safety Protocol: 1. Sound general alarm (7 short + 1 long). 2. Report location to bridge. 3. Activate fixed fire suppression (CO2/foam). 4. Close ventilation dampers. 5. Perform boundary cooling. 6. Muster crew and conduct headcount.",
+    },
+    {
+        "title": "Man Overboard (MOB) Procedures",
+        "content": "Man Overboard Recovery: 1. Shout MAN OVERBOARD. 2. Throw lifebuoy with light/smoke. 3. Press MOB button on GPS. 4. Sound 3 prolonged blasts. 5. Execute Williamson Turn. 6. Launch rescue boat and approach downwind.",
+    },
+    {
+        "title": "Fuel Bunkering Operations",
+        "content": "Fuel Bunkering Checklist: 1. Complete safety checklist with supplier. 2. Close scuppers and drains. 3. Deploy oil spill containment. 4. Max fill 95% for thermal expansion. 5. Maintain VHF Ch 69 communication. 6. Sign Bunker Delivery Note (BDN).",
+    },
+    {
+        "title": "Vessel Pre-Departure Checklist",
+        "content": "Pre-Departure Checklist: 1. Crew muster check. 2. Navigation gear (GPS, Radar, ECDIS, AIS) tested. 3. Steering gear full port to starboard tested. 4. Main engine tested ahead/astern. 5. Watertight doors closed. 6. Passage plan approved.",
+    },
+]
+
+
+async def _ensure_initial_knowledge_seeded(container):
+    repository = container.conversation_repository
+    submissions = await repository.list_submissions()
+    if submissions:
+        return
+
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
+    from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
+
+    for doc in INITIAL_KNOWLEDGE_DOCS:
+        sub_id = uuid4()
+        raw_content = f"# {doc['title']}\n\n{doc['content']}"
+        sub = KnowledgeSubmission(
+            id=sub_id,
+            submitted_by="system_seeder",
+            submitter_role=SubmitterRole.CAPTAIN,
+            raw_content=raw_content,
+            status=SubmissionStatus.APPROVED,
+            rule_results=[{"rule": "AutoSeeded", "outcome": "pass"}],
+            created_at=datetime.now(timezone.utc),
+            reviewed_by="captain",
+        )
+        await repository.save_submission(sub)
+
+        # Index into vector store as well
+        document = Document(id=sub_id, title=doc['title'], source_path=f"seed/{sub_id}")
+        chunk = Chunk(id=uuid4(), document_id=document.id, content=raw_content)
+        await container.vector_store.upsert(chunk)
+
+
+@router.get("/manage")
+async def list_manage_knowledge(
+    x_user_role: str = Header(...),
+):
+    """List all knowledge base items for management (Captain & Crew)."""
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submissions = await repository.list_submissions()
+    if not submissions:
+        await _ensure_initial_knowledge_seeded(container)
+        submissions = await repository.list_submissions()
+
+    items = [
+        {
+            "id": str(s.id),
+            "submitted_by": s.submitted_by,
+            "submitter_role": s.submitter_role.value,
+            "raw_content": s.raw_content,
+            "status": s.status.value,
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in submissions
+    ]
+    return {"items": items, "count": len(items)}
+
+
+@router.put("/manage/{submission_id}")
+async def update_knowledge_item(
+    submission_id: UUID,
+    request: UpdateSubmissionRequest,
+    x_user_role: str = Header(...),
+):
+    """Update knowledge item content and re-index in vector store."""
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    from domain.knowledge.entities import Document, Chunk
+    from uuid import uuid4
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+
+    submission.raw_content = request.raw_content.strip()
+    await repository.save_submission(submission)
+
+    # Re-index in Chroma vector store if approved
+    if submission.status.value == "approved":
+        await container.vector_store.delete_by_document_id(submission.id)
+        doc = Document(id=submission.id, title=f"Submission {submission.id}", source_path=f"submissions/{submission.id}")
+        chunk = Chunk(id=uuid4(), document_id=doc.id, content=submission.raw_content)
+        await container.vector_store.upsert(chunk)
+
+    return {"status": "ok", "message": "Knowledge item updated and re-indexed."}
+
+
+@router.delete("/manage/{submission_id}")
+async def delete_knowledge_item(
+    submission_id: UUID,
+    x_user_role: str = Header(...),
+):
+    """Delete knowledge item from DB and remove its vector embeddings."""
+    if x_user_role != "captain":
+        raise HTTPException(status_code=403, detail="Only captain can delete knowledge items")
+
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+
+    # Remove embeddings from vector store
+    await container.vector_store.delete_by_document_id(submission.id)
+
+    # Delete row from DB
+    async with repository._session_factory() as session:
+        async with session.begin():
+            from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+            row = await session.get(KnowledgeSubmissionModel, submission_id)
+            if row:
+                await session.delete(row)
+
+    return {"status": "ok", "message": "Knowledge item deleted."}
+
+
+@router.get("/presets")
+async def get_knowledge_presets():
+    """Get dynamic preset queries derived ONLY from items present in Knowledge Management."""
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submissions = await repository.list_submissions()
+    if not submissions:
+        await _ensure_initial_knowledge_seeded(container)
+        submissions = await repository.list_submissions()
+
+    presets = []
+    for s in submissions:
+        lines = [line.strip('# ').strip() for line in s.raw_content.split('\n') if line.strip()]
+        if lines:
+            title = lines[0]
+            if len(title) > 60:
+                title = title[:57] + "..."
+            if title and title not in presets:
+                presets.append(title)
+
+    return {"presets": presets[:8]}
+
+

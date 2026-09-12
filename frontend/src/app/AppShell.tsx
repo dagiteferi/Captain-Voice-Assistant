@@ -6,6 +6,8 @@ import {
   ClipboardCheck,
   Radio,
   Circle,
+  Database,
+  Settings,
 } from 'lucide-react'
 import { RoleSwitcher, RoleBadge } from '@/shared/ui/RoleBadge'
 import { useRole } from '@/shared/lib/roles'
@@ -23,6 +25,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/console', label: 'Console', icon: Terminal },
   { to: '/trace', label: 'Trace', icon: GitBranch },
   { to: '/submit-knowledge', label: 'Submit Knowledge', icon: BookOpen },
+  { to: '/manage-knowledge', label: 'Manage Knowledge', icon: Database },
   {
     to: '/review-queue',
     label: 'Review Queue',
@@ -30,7 +33,9 @@ const NAV_ITEMS: NavItem[] = [
     requiresCaptain: true,
     tooltip: 'Captain access only',
   },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
+
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { role } = useRole()
@@ -71,16 +76,6 @@ function TopBar() {
 
       {/* Right controls */}
       <div className="flex items-center gap-3">
-        {/* System health indicator */}
-        <div className="hidden md:flex items-center gap-1.5 text-emerald">
-          <Circle className="h-2 w-2 fill-current" />
-          <span className="mono text-[11px] text-text-secondary">SYS ONLINE</span>
-        </div>
-
-        <div className="w-px h-4 bg-border" />
-
-        <RoleSwitcher />
-
         <div className="hidden md:block">
           <RoleBadge role={role} compact />
         </div>

@@ -9,6 +9,7 @@ from domain.exceptions import MissingVoiceProfileError
 class VoiceProfile:
     name: str
     language: Language
+    voice_id: str | None = None
     id: UUID = field(default_factory=uuid4)
 
 

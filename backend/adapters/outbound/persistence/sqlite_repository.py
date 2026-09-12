@@ -72,12 +72,14 @@ class SQLiteConversationRepository:
                             conversation_id=command.conversation_id,
                             input_text=command.input_text,
                             status=command.status.value,
+                            voice_id=command.voice_id,
                             created_at=command.created_at,
                         )
                     )
                     return
                 row.input_text = command.input_text
                 row.status = command.status.value
+                row.voice_id = command.voice_id
 
     async def get_command(self, command_id: UUID) -> Command | None:
         async with self._session_factory() as session:
@@ -121,8 +123,14 @@ class SQLiteConversationRepository:
     async def save_translation(self, translation: Translation) -> None:
         async with self._session_factory() as session:
             async with session.begin():
-                row = await session.get(TranslationModel, translation.id)
-                if row is None:
+                existing = (
+                    await session.scalars(
+                        select(TranslationModel).where(
+                            TranslationModel.answer_id == translation.answer_id
+                        )
+                    )
+                ).first()
+                if existing is None:
                     session.add(
                         TranslationModel(
                             id=translation.id,
@@ -132,8 +140,9 @@ class SQLiteConversationRepository:
                         )
                     )
                     return
-                row.translated_text = translation.translated_text
-                row.target_language = translation.target_language.code
+                existing.translated_text = translation.translated_text
+                existing.target_language = translation.target_language.code
+                translation.id = existing.id
 
     async def save_audio_response(self, audio: AudioResponse) -> None:
         async with self._session_factory() as session:
@@ -326,6 +335,21 @@ class SQLiteConversationRepository:
                 )
             return submissions
 
+    async def list_document_titles(self) -> list[str]:
+        from adapters.outbound.persistence.models import KnowledgeDocumentModel
+        async with self._session_factory() as session:
+            result = await session.scalars(select(KnowledgeDocumentModel.title))
+            return list(result)
+
+    async def list_recent_commands(self, limit: int = 10) -> list:
+        from adapters.outbound.persistence.models import CommandModel
+        async with self._session_factory() as session:
+            result = await session.scalars(
+                select(CommandModel).order_by(CommandModel.created_at.desc()).limit(limit)
+            )
+            return [_command_from_row(r) for r in result]
+
+
 
 def _command_from_row(row: CommandModel) -> Command:
     command = Command(
@@ -333,6 +357,7 @@ def _command_from_row(row: CommandModel) -> Command:
         conversation_id=row.conversation_id,
         input_text=row.input_text,
         status=CommandStatus(row.status),
+        voice_id=getattr(row, "voice_id", None),
         created_at=row.created_at,
     )
     if row.grounded_answer is not None:
