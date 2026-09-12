@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # ── LLM (Gemini API — free tier) ──────────────────
     gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
 
     # ── Translation (MyMemory — free, no key) ─────────
     mymemory_email: str = ""  # Optional: raises daily limit from 1000 to 10000

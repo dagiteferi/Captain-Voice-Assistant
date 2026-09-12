@@ -19,8 +19,10 @@ export function useAudioBlob(audioUrl?: string | null) {
 
     const fetchBlob = async () => {
       try {
-        const res = await fetch(audioUrl)
-        if (!res.ok) throw new Error('Failed to fetch audio')
+        const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+        const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${baseUrl}${audioUrl}`
+        const res = await fetch(fullUrl)
+        if (!res.ok) throw new Error(`Failed to fetch audio (${res.status})`)
         const blob = await res.blob()
         if (isMounted) {
           currentObjectUrl = URL.createObjectURL(blob)

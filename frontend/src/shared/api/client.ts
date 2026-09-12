@@ -11,8 +11,8 @@ export async function fetchApi<T>(
     ...(headers as Record<string, string>),
   }
 
-  // EXCEPTION: POST /api/v1/knowledge/submissions must NOT send the X-User-Role header
-  const isKnowledgeSubmission = endpoint === '/api/v1/knowledge/submissions' && restOptions.method === 'POST'
+  // EXCEPTION: POST /api/v1/knowledge/submissions* must NOT send the X-User-Role header
+  const isKnowledgeSubmission = endpoint.startsWith('/api/v1/knowledge/submissions') && restOptions.method === 'POST'
   
   if (role && !isKnowledgeSubmission) {
     reqHeaders['X-User-Role'] = role

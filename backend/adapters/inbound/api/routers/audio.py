@@ -10,9 +10,9 @@ router = APIRouter(prefix="/audio", tags=["audio"])
 @router.get("/{audio_response_id}")
 async def get_audio(
     audio_response_id: UUID,
-    x_user_role: str = Header(...),
+    x_user_role: str | None = Header(None),
 ) -> FileResponse:
-    if x_user_role not in ("captain", "crew"):
+    if x_user_role and x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
     from main import get_container

@@ -24,7 +24,7 @@ class GeminiEmbedderAdapter(TextEmbedder):
     def __init__(
         self,
         api_key: str,
-        model: str = "text-embedding-004",
+        model: str = "gemini-embedding-001",
         task_type: str = "RETRIEVAL_DOCUMENT",
     ) -> None:
         if not api_key:

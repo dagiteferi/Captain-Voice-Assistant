@@ -75,11 +75,12 @@ class SubmitKnowledgeResponse(BaseModel):
     rule_results: list[RuleResultItem]
 
 
-@router.post("/submissions", status_code=status.HTTP_201_CREATED)
-async def submit_knowledge(
-    request: SubmitKnowledgeRequest,
+async def _process_and_save_submission(
+    submitted_by: str,
+    submitter_role_str: str,
+    raw_content: str,
+    title_prefix: str = "Submission",
 ) -> SubmitKnowledgeResponse:
-    """Propose new information for the knowledge base."""
     from main import get_container
     from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
     from domain.knowledge.value_objects import SubmitterRole
@@ -89,14 +90,14 @@ async def submit_knowledge(
     container = get_container()
     repository = container.conversation_repository
 
-    submitter_role = SubmitterRole(request.submitter_role)
+    submitter_role = SubmitterRole(submitter_role_str)
     submission = KnowledgeSubmission(
-        submitted_by=request.submitted_by,
+        submitted_by=submitted_by,
         submitter_role=submitter_role,
-        raw_content=request.raw_content,
+        raw_content=raw_content,
     )
 
-    hits = await container.vector_store.search(request.raw_content, limit=1)
+    hits = await container.vector_store.search(raw_content, limit=1)
     max_similarity = hits[0].similarity_score if hits else 0.0
     status_result, rule_results = evaluate_submission(
         submission,
@@ -109,7 +110,7 @@ async def submit_knowledge(
     if status_result.value == "approved":
         doc = Document(
             id=uuid4(),
-            title=f"Submission {submission.id}",
+            title=f"{title_prefix} {submission.id}",
             source_path=f"submissions/{submission.id}",
         )
         chunk = Chunk(document_id=doc.id, content=submission.raw_content)
@@ -123,6 +124,109 @@ async def submit_knowledge(
         status=status_result.value,
         rule_results=[RuleResultItem(**r) for r in rule_results],
     )
+
+
+@router.post("/submissions", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge(
+    request: SubmitKnowledgeRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 1: Propose raw text content for the knowledge base."""
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=request.raw_content,
+    )
+
+
+from fastapi import UploadFile, File, Form
+
+
+@router.post("/submissions/file", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_file(
+    file: UploadFile = File(...),
+    submitted_by: str = Form("Captain"),
+    submitter_role: str = Form("captain"),
+) -> SubmitKnowledgeResponse:
+    """Method 2: Upload file (PDF, Word, PPT, Text, CSV, JSON) to extract and propose knowledge."""
+    from application.knowledge.file_parser import extract_text_from_file
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+
+    try:
+        extracted_text = extract_text_from_file(file.filename or "file.txt", file_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    content_with_meta = f"# Source File: {file.filename}\n\n{extracted_text}"
+    return await _process_and_save_submission(
+        submitted_by=submitted_by,
+        submitter_role_str=submitter_role,
+        raw_content=content_with_meta,
+        title_prefix=f"File ({file.filename})",
+    )
+
+
+class SubmitUrlRequest(BaseModel):
+    submitted_by: str
+    submitter_role: str
+    url: str
+
+
+@router.post("/submissions/url", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_url(
+    request: SubmitUrlRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 3: Ingest knowledge from a web page / URL."""
+    from application.knowledge.file_parser import extract_text_from_url
+
+    try:
+        extracted_text = await extract_text_from_url(request.url)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Failed to fetch content from URL: {e}")
+
+    content_with_meta = f"# Source URL: {request.url}\n\n{extracted_text}"
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=content_with_meta,
+        title_prefix=f"URL ({request.url})",
+    )
+
+
+class SubmitProcedureRequest(BaseModel):
+    submitted_by: str
+    submitter_role: str
+    title: str
+    category: str
+    severity: str
+    steps: list[str]
+    notes: str | None = None
+
+
+@router.post("/submissions/procedure", status_code=status.HTTP_201_CREATED)
+async def submit_knowledge_procedure(
+    request: SubmitProcedureRequest,
+) -> SubmitKnowledgeResponse:
+    """Method 4: Propose a structured Standard Operating Procedure (SOP)."""
+    formatted_steps = "\n".join([f"{i+1}. {step}" for i, step in enumerate(request.steps) if step.strip()])
+    content = (
+        f"# SOP: {request.title}\n"
+        f"**Category:** {request.category} | **Severity Level:** {request.severity}\n\n"
+        f"## Standard Operating Steps:\n"
+        f"{formatted_steps}\n"
+    )
+    if request.notes:
+        content += f"\n## Operational Notes & Safety Warnings:\n{request.notes}\n"
+
+    return await _process_and_save_submission(
+        submitted_by=request.submitted_by,
+        submitter_role_str=request.submitter_role,
+        raw_content=content,
+        title_prefix=f"SOP ({request.title})",
+    )
+
 
 
 class SubmissionItem(BaseModel):
