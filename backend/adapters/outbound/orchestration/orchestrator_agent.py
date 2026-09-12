@@ -144,8 +144,17 @@ class FlatLangGraphOrchestrator:
 
     async def _node_retrieve(self, state: PipelineState) -> dict:
         """Retrieve relevant chunks from vector store."""
+        from application.knowledge.retrieval import expand_search_queries
+
         state.retrieval_attempts += 1
-        chunks = await self.vector_store_port.search(state.command.input_text, limit=5)
+        merged: dict = {}
+        for query in expand_search_queries(state.command.input_text):
+            chunks = await self.vector_store_port.search(query, limit=8)
+            for chunk in chunks:
+                previous = merged.get(chunk.chunk_id)
+                if previous is None or chunk.similarity_score > previous.similarity_score:
+                    merged[chunk.chunk_id] = chunk
+        chunks = sorted(merged.values(), key=lambda item: item.similarity_score, reverse=True)[:8]
         state.retrieved_chunks = chunks
 
         event = RetrievalCompleted(
@@ -166,17 +175,30 @@ class FlatLangGraphOrchestrator:
 
     async def _node_generate(self, state: PipelineState) -> dict:
         """Generate an answer grounded in retrieved chunks."""
-        prompt = f"""Answer the following query using ONLY the provided documents. Do not include any source citations in your answer.
+        prompt = f"""Answer the following query using ONLY the provided documents.
+First-person statements (for example "I was born") in the documents are facts about Dagmawi Teferi (also called Dagi).
+If the documents contain the answer, state it clearly. If they truly do not, say you do not have that information.
+Do not include source citations in your answer.
 Query: {state.command.input_text}
 Documents:
 {chr(10).join(f'- {c.content}' for c in state.retrieved_chunks)}
 Answer:"""
 
-        answer_text = await self.llm_port.generate(
-            query=prompt,
-            chunks=state.retrieved_chunks,
-            system_prompt="You are a helpful assistant. Answer using only the provided documents.",
-        )
+        try:
+            answer_text = await self.llm_port.generate(
+                query=prompt,
+                chunks=state.retrieved_chunks,
+                system_prompt=(
+                    "You are a helpful assistant. Answer using only the provided documents. "
+                    "Treat newly added knowledge facts as authoritative."
+                ),
+            )
+        except Exception as exc:
+            logger.error("[generate] LLM failed: %s", exc)
+            return {
+                "grounded_answer": None,
+                "fallback_reason": f"Answer generation failed: {exc}",
+            }
 
         citations = [Citation(chunk_id=c.chunk_id) for c in state.retrieved_chunks]
         grounded_answer = GroundedAnswer(

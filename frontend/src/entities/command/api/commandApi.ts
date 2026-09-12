@@ -54,9 +54,9 @@ export async function getKnowledgePresets(role: string): Promise<string[]> {
     return res.presets || []
   } catch {
     return [
-      'Emergency Engine Shutdown Procedures',
-      'Fire Safety Protocol',
-      'Man Overboard (MOB) Procedures',
+      'Who is Dagmawi Teferi?',
+      'When was Dagmawi Teferi born?',
+      'What did Dagmawi Teferi build for the Harvard HSIL hackathon?',
     ]
   }
 }

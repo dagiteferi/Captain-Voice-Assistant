@@ -58,3 +58,42 @@ async def test_approved_submission_is_searchable():
         results = await container.vector_store.search("heading magnetic south", limit=5)
         assert len(results) >= 1
         assert "heading" in results[0].content.lower()
+
+
+@pytest.mark.asyncio
+async def test_updated_manage_fact_is_searchable_for_birth_query():
+    chroma_dir = tempfile.mkdtemp()
+    db_path = tempfile.mktemp(suffix=".db")
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    await container.init_db()
+    main._container = container
+
+    app = main.create_app()
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        headers = {"X-User-Role": "captain"}
+        create = await client.post(
+            "/api/v1/knowledge/submissions",
+            json={
+                "submitted_by": "captain-user",
+                "submitter_role": "captain",
+                "raw_content": "Placeholder biography text used before the birth fact is added.",
+            },
+            headers=headers,
+        )
+        assert create.status_code == 201
+        submission_id = create.json()["submission_id"]
+
+        updated = await client.put(
+            f"/api/v1/knowledge/manage/{submission_id}",
+            json={"raw_content": "I was born in 1999 at Adama."},
+            headers=headers,
+        )
+        assert updated.status_code == 200
+
+        results = await container.vector_store.search("when dagi were born", limit=5)
+        assert results
+        assert "1999" in results[0].content

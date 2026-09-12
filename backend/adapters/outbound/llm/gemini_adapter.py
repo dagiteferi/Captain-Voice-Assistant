@@ -6,6 +6,7 @@ No local model installation needed.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Sequence
 
@@ -60,51 +61,67 @@ class GeminiLLMAdapter:
             len(query),
         )
 
-        try:
-            response = await self._client.post(
-                url,
-                json=payload,
-                params={"key": self._api_key},
-            )
-            response.raise_for_status()
-            data = response.json()
+        last_error: Exception | None = None
+        for attempt in range(3):
+            try:
+                response = await self._client.post(
+                    url,
+                    json=payload,
+                    params={"key": self._api_key},
+                )
+                if response.status_code in (429, 503) and attempt < 2:
+                    logger.warning(
+                        "[gemini] HTTP %s, retrying (%s/3)...",
+                        response.status_code,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(0.8 * (attempt + 1))
+                    continue
+                response.raise_for_status()
+                data = response.json()
 
-            candidates = data.get("candidates", [])
-            if not candidates:
-                raise RuntimeError(
-                    f"Gemini returned no candidates. Full response: {data}"
+                candidates = data.get("candidates", [])
+                if not candidates:
+                    raise RuntimeError(
+                        f"Gemini returned no candidates. Full response: {data}"
+                    )
+
+                text = (
+                    candidates[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                    .strip()
                 )
 
-            text = (
-                candidates[0]
-                .get("content", {})
-                .get("parts", [{}])[0]
-                .get("text", "")
-                .strip()
-            )
+                if not text:
+                    raise RuntimeError(
+                        "Gemini returned an empty text response. "
+                        "Check model availability and API key quota."
+                    )
 
-            if not text:
+                logger.info("[gemini] ✓ Response: %d chars.", len(text))
+                return text
+            except RuntimeError:
+                raise
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                if e.response.status_code in (429, 503) and attempt < 2:
+                    await asyncio.sleep(0.8 * (attempt + 1))
+                    continue
+                body = e.response.text[:400]
                 raise RuntimeError(
-                    "Gemini returned an empty text response. "
-                    "Check model availability and API key quota."
-                )
+                    f"Gemini API HTTP {e.response.status_code}: {body}"
+                ) from e
+            except httpx.ConnectError as e:
+                raise RuntimeError(
+                    "Cannot reach Gemini API. Check network connectivity."
+                ) from e
+            except Exception as e:
+                last_error = e
+                raise RuntimeError(f"Gemini generate() failed: {e}") from e
 
-            logger.info("[gemini] ✓ Response: %d chars.", len(text))
-            return text
-
-        except RuntimeError:
-            raise
-        except httpx.HTTPStatusError as e:
-            body = e.response.text[:400]
-            raise RuntimeError(
-                f"Gemini API HTTP {e.response.status_code}: {body}"
-            ) from e
-        except httpx.ConnectError as e:
-            raise RuntimeError(
-                "Cannot reach Gemini API. Check network connectivity."
-            ) from e
-        except Exception as e:
-            raise RuntimeError(f"Gemini generate() failed: {e}") from e
+        raise RuntimeError(f"Gemini generate() failed after retries: {last_error}")
 
     async def aclose(self) -> None:
         await self._client.aclose()

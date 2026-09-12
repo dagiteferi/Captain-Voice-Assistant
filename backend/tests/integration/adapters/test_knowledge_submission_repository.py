@@ -75,3 +75,28 @@ async def test_list_submissions_with_status_filter():
     approved = await repository.list_submissions(status=SubmissionStatus.APPROVED.value)
     assert len(approved) == 1
     assert approved[0].submitted_by == "captain-1"
+
+
+@pytest.mark.asyncio
+async def test_save_submission_updates_raw_content():
+    db_path = tempfile.mktemp(suffix=".db")
+    db_url = f"sqlite+aiosqlite:///{db_path}"
+
+    container = DIContainer(db_url=db_url, chroma_dir=tempfile.mkdtemp())
+    await container.init_db()
+    repository = container.conversation_repository
+
+    sub = KnowledgeSubmission(
+        submitted_by="captain-1",
+        submitter_role=SubmitterRole.CAPTAIN,
+        raw_content="Original knowledge text that is long enough to save.",
+        status=SubmissionStatus.APPROVED,
+    )
+    await repository.save_submission(sub)
+    sub.raw_content = "I was born in 1999 at Adama. This is the updated knowledge fact."
+    await repository.save_submission(sub)
+
+    loaded = await repository.get_submission(sub.id)
+    assert loaded is not None
+    assert "1999" in loaded.raw_content
+    assert "Adama" in loaded.raw_content

@@ -128,9 +128,11 @@ In a separate terminal (with backend running):
 python tools/seed_knowledge.py
 ```
 
+This **replaces** any previous sample KB with profile chunks from Dagmawi Teferi's CV, including birth year, skills, roles, projects, and education.
+
 Output:
 ```
-✓ Successfully ingested 20 documents!
+✓ Successfully ingested 21 documents!
 ```
 
 ### 5. Start Frontend

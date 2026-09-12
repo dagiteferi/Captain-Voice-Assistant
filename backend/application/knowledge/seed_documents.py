@@ -1,5 +1,12 @@
 SAMPLE_DOCUMENTS = [
     {
+        "title": "Birthplace and year of birth",
+        "content": (
+            "Dagmawi Teferi (Dagi) was born in 1999 in Adama, Ethiopia. "
+            "Adama is also where he later studied Computer Science at Unity University."
+        ),
+    },
+    {
         "title": "Identity and contact — Dagmawi Teferi",
         "content": (
             "Dagmawi Teferi is an AI Engineer, ML Engineer, and Backend Developer based in Ethiopia. "

@@ -84,10 +84,9 @@ async def _process_and_save_submission(
     title_prefix: str = "Submission",
 ) -> SubmitKnowledgeResponse:
     from main import get_container
-    from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
+    from domain.knowledge.entities import KnowledgeSubmission
     from domain.knowledge.value_objects import SubmitterRole
     from domain.knowledge.rules import evaluate_submission
-    from uuid import uuid4
 
     container = get_container()
     repository = container.conversation_repository
@@ -110,13 +109,13 @@ async def _process_and_save_submission(
     submission.record_rule_results(rule_results)
 
     if status_result.value == "approved":
-        doc = Document(
-            id=uuid4(),
+        from application.knowledge.retrieval import upsert_submission_chunk
+
+        await upsert_submission_chunk(
+            container.vector_store,
+            submission,
             title=f"{title_prefix} {submission.id}",
-            source_path=f"submissions/{submission.id}",
         )
-        chunk = Chunk(document_id=doc.id, content=submission.raw_content)
-        await container.vector_store.upsert(chunk)
         submission.mark_indexed()
 
     await repository.save_submission(submission)
@@ -337,8 +336,7 @@ async def approve_submission(
         raise HTTPException(status_code=403, detail="Only captain can approve submissions")
 
     from main import get_container
-    from domain.knowledge.entities import Document, Chunk
-    from uuid import uuid4
+    from application.knowledge.retrieval import upsert_submission_chunk
 
     container = get_container()
     repository = container.conversation_repository
@@ -351,9 +349,11 @@ async def approve_submission(
 
     indexed = False
     try:
-        doc = Document(id=uuid4(), title=f"Submission {submission_id}", source_path=f"submissions/{submission_id}")
-        chunk = Chunk(document_id=doc.id, content=submission.raw_content)
-        await container.vector_store.upsert(chunk)
+        await upsert_submission_chunk(
+            container.vector_store,
+            submission,
+            title=f"Submission {submission_id}",
+        )
         submission.mark_indexed()
         indexed = True
     except Exception:
@@ -404,6 +404,27 @@ class UpdateSubmissionRequest(BaseModel):
     raw_content: str
 
 
+@router.post("/replace-sample", status_code=status.HTTP_201_CREATED)
+async def replace_sample_knowledge(
+    x_user_role: str = Header(...),
+) -> IngestDocumentsResponse:
+    """Wipe the vector store and re-seed Dagmawi Teferi's profile documents."""
+    if x_user_role != "captain":
+        raise HTTPException(status_code=403, detail="Only captain can replace the sample KB")
+
+    from main import get_container
+
+    container = get_container()
+    container.vector_store.reset()
+    await container.conversation_repository.delete_all_submissions()
+    await _ensure_initial_knowledge_seeded(container)
+    seeded = await container.conversation_repository.list_submissions()
+    return IngestDocumentsResponse(
+        ingested_count=len(seeded),
+        document_ids=[s.id for s in seeded],
+    )
+
+
 async def _ensure_initial_knowledge_seeded(container):
     repository = container.conversation_repository
     submissions = await repository.list_submissions()
@@ -412,8 +433,9 @@ async def _ensure_initial_knowledge_seeded(container):
 
     from uuid import uuid4
     from datetime import datetime, timezone
-    from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
+    from domain.knowledge.entities import KnowledgeSubmission, Chunk
     from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
+    from application.knowledge.retrieval import indexable_text
 
     for doc in INITIAL_KNOWLEDGE_DOCS:
         sub_id = uuid4()
@@ -430,9 +452,10 @@ async def _ensure_initial_knowledge_seeded(container):
         )
         await repository.save_submission(sub)
 
-        # Index into vector store as well
-        document = Document(id=sub_id, title=doc['title'], source_path=f"seed/{sub_id}")
-        chunk = Chunk(id=uuid4(), document_id=document.id, content=raw_content)
+        chunk = Chunk(
+            document_id=sub_id,
+            content=indexable_text(raw_content, title=doc["title"]),
+        )
         await container.vector_store.upsert(chunk)
 
 
@@ -478,8 +501,7 @@ async def update_knowledge_item(
         raise HTTPException(status_code=403, detail="Access denied")
 
     from main import get_container
-    from domain.knowledge.entities import Document, Chunk
-    from uuid import uuid4
+    from application.knowledge.retrieval import upsert_submission_chunk
 
     container = get_container()
     repository = container.conversation_repository
@@ -491,12 +513,15 @@ async def update_knowledge_item(
     submission.raw_content = request.raw_content.strip()
     await repository.save_submission(submission)
 
-    # Re-index in Chroma vector store if approved
-    if submission.status.value == "approved":
-        await container.vector_store.delete_by_document_id(submission.id)
-        doc = Document(id=submission.id, title=f"Submission {submission.id}", source_path=f"submissions/{submission.id}")
-        chunk = Chunk(id=uuid4(), document_id=doc.id, content=submission.raw_content)
-        await container.vector_store.upsert(chunk)
+    if submission.status.value in ("approved", "indexed"):
+        await upsert_submission_chunk(
+            container.vector_store,
+            submission,
+            title=f"Submission {submission.id}",
+        )
+        if submission.status.value == "approved":
+            submission.mark_indexed()
+            await repository.save_submission(submission)
 
     return {"status": "ok", "message": "Knowledge item updated and re-indexed."}
 

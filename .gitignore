@@ -41,3 +41,5 @@ dist/
 .env.*
 .env.local
 !.env.example
+
+DEMO_SCRIPT.md

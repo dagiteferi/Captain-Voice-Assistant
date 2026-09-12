@@ -19,8 +19,7 @@ def main() -> None:
 
     with httpx.Client(timeout=60.0) as client:
         response = client.post(
-            f"{BACKEND_URL}/api/v1/knowledge/documents",
-            json={"documents": SAMPLE_DOCUMENTS},
+            f"{BACKEND_URL}/api/v1/knowledge/replace-sample",
             headers={
                 "Content-Type": "application/json",
                 "X-User-Role": "captain",

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -282,6 +282,7 @@ class SQLiteConversationRepository:
                         )
                     )
                     return
+                row.raw_content = submission.raw_content
                 row.status = submission.status.value
                 row.reviewed_by = submission.reviewed_by
                 row.rule_results_json = payload
@@ -334,6 +335,13 @@ class SQLiteConversationRepository:
                     )
                 )
             return submissions
+
+    async def delete_all_submissions(self) -> None:
+        from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                await session.execute(delete(KnowledgeSubmissionModel))
 
     async def list_document_titles(self) -> list[str]:
         from adapters.outbound.persistence.models import KnowledgeDocumentModel

@@ -27,7 +27,12 @@ function withCacheBust(url: string | null | undefined): string | null {
 }
 
 function displayText(command: CommandResponse): string {
-  return command.translated_text || command.answer_text || 'No answer returned by pipeline.'
+  const text = command.translated_text || command.answer_text
+  if (text) return text
+  if (command.status === 'ungrounded' || command.status === 'failed') {
+    return 'No grounded answer was found in the knowledge base. Add the fact in Knowledge, wait until it is Indexed, then ask again.'
+  }
+  return 'The assistant is still working, or the language model did not return text. Try the same question once more.'
 }
 
 interface ChatMessage {
