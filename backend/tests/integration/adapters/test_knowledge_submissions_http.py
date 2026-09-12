@@ -8,7 +8,6 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from config.di_container import DIContainer
-from tests.fakes import HashingEmbedder
 
 import main
 
@@ -19,7 +18,7 @@ async def test_submit_knowledge_endpoint():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
     await container.init_db()
 
     main._container = container
@@ -38,7 +37,7 @@ async def test_submit_knowledge_endpoint():
         data = resp.json()
         assert "submission_id" in data
         assert data["status"] == "approved"  # captain auto-approves
-        assert len(data["rule_results"]) == 4
+        assert len(data["rule_results"]) == 3
 
 
 @pytest.mark.asyncio
@@ -47,7 +46,7 @@ async def test_list_submissions_endpoint():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
     await container.init_db()
 
     main._container = container

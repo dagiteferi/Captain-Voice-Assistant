@@ -6,7 +6,6 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 
 from config.di_container import DIContainer
-from tests.fakes import HashingEmbedder
 
 import main
 
@@ -18,7 +17,7 @@ async def test_captain_submission_auto_indexes_immediately():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
     await container.init_db()
 
     main._container = container
@@ -52,7 +51,7 @@ async def test_crew_submission_pending_then_searchable_after_approval():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
     await container.init_db()
 
     main._container = container
@@ -102,7 +101,7 @@ async def test_guest_submission_always_pending():
     db_path = tempfile.mktemp(suffix=".db")
     db_url = f"sqlite+aiosqlite:///{db_path}"
 
-    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir, embedder=HashingEmbedder())
+    container = DIContainer(db_url=db_url, chroma_dir=chroma_dir)
     await container.init_db()
 
     main._container = container

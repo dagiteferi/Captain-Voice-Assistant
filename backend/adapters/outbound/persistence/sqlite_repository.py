@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID, uuid4
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -72,14 +72,12 @@ class SQLiteConversationRepository:
                             conversation_id=command.conversation_id,
                             input_text=command.input_text,
                             status=command.status.value,
-                            voice_id=command.voice_id,
                             created_at=command.created_at,
                         )
                     )
                     return
                 row.input_text = command.input_text
                 row.status = command.status.value
-                row.voice_id = command.voice_id
 
     async def get_command(self, command_id: UUID) -> Command | None:
         async with self._session_factory() as session:
@@ -123,14 +121,8 @@ class SQLiteConversationRepository:
     async def save_translation(self, translation: Translation) -> None:
         async with self._session_factory() as session:
             async with session.begin():
-                existing = (
-                    await session.scalars(
-                        select(TranslationModel).where(
-                            TranslationModel.answer_id == translation.answer_id
-                        )
-                    )
-                ).first()
-                if existing is None:
+                row = await session.get(TranslationModel, translation.id)
+                if row is None:
                     session.add(
                         TranslationModel(
                             id=translation.id,
@@ -140,9 +132,8 @@ class SQLiteConversationRepository:
                         )
                     )
                     return
-                existing.translated_text = translation.translated_text
-                existing.target_language = translation.target_language.code
-                translation.id = existing.id
+                row.translated_text = translation.translated_text
+                row.target_language = translation.target_language.code
 
     async def save_audio_response(self, audio: AudioResponse) -> None:
         async with self._session_factory() as session:
@@ -162,42 +153,6 @@ class SQLiteConversationRepository:
                 row.audio_path = audio.audio_path
                 row.duration_ms = audio.duration_ms
                 row.voice_profile_id = audio.voice_profile_id
-
-    async def get_translation_for_answer(self, answer_id: UUID) -> Translation | None:
-        async with self._session_factory() as session:
-            row = (
-                await session.scalars(
-                    select(TranslationModel).where(TranslationModel.answer_id == answer_id)
-                )
-            ).first()
-            if row is None:
-                return None
-            return Translation(
-                id=row.id,
-                answer_id=row.answer_id,
-                target_language=Language(row.target_language),
-                translated_text=row.translated_text,
-            )
-
-    async def get_audio_for_translation(self, translation_id: UUID) -> AudioResponse | None:
-        async with self._session_factory() as session:
-            row = (
-                await session.scalars(
-                    select(AudioResponseModel).where(
-                        AudioResponseModel.translation_id == translation_id
-                    )
-                )
-            ).first()
-            if row is None:
-                return None
-            return _audio_from_row(row)
-
-    async def get_audio_response(self, audio_id: UUID) -> AudioResponse | None:
-        async with self._session_factory() as session:
-            row = await session.get(AudioResponseModel, audio_id)
-            if row is None:
-                return None
-            return _audio_from_row(row)
 
     async def append_event(self, command_id: UUID, event: DomainEvent) -> None:
         event_type, payload_json = dump_event(event)
@@ -282,7 +237,6 @@ class SQLiteConversationRepository:
                         )
                     )
                     return
-                row.raw_content = submission.raw_content
                 row.status = submission.status.value
                 row.reviewed_by = submission.reviewed_by
                 row.rule_results_json = payload
@@ -336,28 +290,6 @@ class SQLiteConversationRepository:
                 )
             return submissions
 
-    async def delete_all_submissions(self) -> None:
-        from adapters.outbound.persistence.models import KnowledgeSubmissionModel
-
-        async with self._session_factory() as session:
-            async with session.begin():
-                await session.execute(delete(KnowledgeSubmissionModel))
-
-    async def list_document_titles(self) -> list[str]:
-        from adapters.outbound.persistence.models import KnowledgeDocumentModel
-        async with self._session_factory() as session:
-            result = await session.scalars(select(KnowledgeDocumentModel.title))
-            return list(result)
-
-    async def list_recent_commands(self, limit: int = 10) -> list:
-        from adapters.outbound.persistence.models import CommandModel
-        async with self._session_factory() as session:
-            result = await session.scalars(
-                select(CommandModel).order_by(CommandModel.created_at.desc()).limit(limit)
-            )
-            return [_command_from_row(r) for r in result]
-
-
 
 def _command_from_row(row: CommandModel) -> Command:
     command = Command(
@@ -365,7 +297,6 @@ def _command_from_row(row: CommandModel) -> Command:
         conversation_id=row.conversation_id,
         input_text=row.input_text,
         status=CommandStatus(row.status),
-        voice_id=getattr(row, "voice_id", None),
         created_at=row.created_at,
     )
     if row.grounded_answer is not None:
@@ -388,14 +319,4 @@ def _answer_from_row(row: GroundedAnswerModel) -> GroundedAnswer:
         command_id=row.command_id,
         answer_text=row.answer_text,
         citations=citations,
-    )
-
-
-def _audio_from_row(row: AudioResponseModel) -> AudioResponse:
-    return AudioResponse(
-        id=row.id,
-        translation_id=row.translation_id,
-        voice_profile_id=row.voice_profile_id,
-        audio_path=row.audio_path,
-        duration_ms=row.duration_ms,
     )

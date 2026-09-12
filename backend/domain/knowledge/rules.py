@@ -17,7 +17,7 @@ class MinMaxLengthRule:
     @staticmethod
     def evaluate(submission: KnowledgeSubmission) -> RuleOutcome:
         l = len(submission.raw_content.strip())
-        if l < 5 or l > 500000:
+        if l < 20 or l > 4000:
             return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.FAIL, reason="length_out_of_bounds")
         return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.PASS)
 
@@ -94,17 +94,12 @@ def evaluate_submission(submission: KnowledgeSubmission, submitter_role: Submitt
 
     status = TrustedRoleAutoApproveRule.decide(submitter_role, results)
 
+    # Build API-friendly dicts
     api_results = []
     for r in results:
         entry = {"rule": r.rule_name, "outcome": r.verdict.value}
         if r.rule_name == DuplicateSimilarityRule.NAME and similarity_fn is not None:
             entry["similarity"] = float(similarity_fn(submission))
         api_results.append(entry)
-
-    if submitter_role is SubmitterRole.CAPTAIN:
-        role_outcome = RuleVerdict.PASS.value
-    else:
-        role_outcome = RuleVerdict.NEEDS_REVIEW.value
-    api_results.append({"rule": TrustedRoleAutoApproveRule.NAME, "outcome": role_outcome})
 
     return status, api_results
