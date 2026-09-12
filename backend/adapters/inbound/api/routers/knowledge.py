@@ -402,6 +402,62 @@ class UpdateSubmissionRequest(BaseModel):
     raw_content: str
 
 
+INITIAL_KNOWLEDGE_DOCS = [
+    {
+        "title": "Emergency Engine Shutdown Procedures",
+        "content": "Emergency Engine Shutdown Procedures: 1. Notify bridge immediately. 2. Press Emergency Stop button on MECP. 3. Close fuel supply valve counter-clockwise. 4. Activate emergency ventilation. 5. Engage turning gear for cooldown. 6. Log shutdown in Engine Log Book.",
+    },
+    {
+        "title": "Fire Safety Protocol",
+        "content": "Fire Safety Protocol: 1. Sound general alarm (7 short + 1 long). 2. Report location to bridge. 3. Activate fixed fire suppression (CO2/foam). 4. Close ventilation dampers. 5. Perform boundary cooling. 6. Muster crew and conduct headcount.",
+    },
+    {
+        "title": "Man Overboard (MOB) Procedures",
+        "content": "Man Overboard Recovery: 1. Shout MAN OVERBOARD. 2. Throw lifebuoy with light/smoke. 3. Press MOB button on GPS. 4. Sound 3 prolonged blasts. 5. Execute Williamson Turn. 6. Launch rescue boat and approach downwind.",
+    },
+    {
+        "title": "Fuel Bunkering Operations",
+        "content": "Fuel Bunkering Checklist: 1. Complete safety checklist with supplier. 2. Close scuppers and drains. 3. Deploy oil spill containment. 4. Max fill 95% for thermal expansion. 5. Maintain VHF Ch 69 communication. 6. Sign Bunker Delivery Note (BDN).",
+    },
+    {
+        "title": "Vessel Pre-Departure Checklist",
+        "content": "Pre-Departure Checklist: 1. Crew muster check. 2. Navigation gear (GPS, Radar, ECDIS, AIS) tested. 3. Steering gear full port to starboard tested. 4. Main engine tested ahead/astern. 5. Watertight doors closed. 6. Passage plan approved.",
+    },
+]
+
+
+async def _ensure_initial_knowledge_seeded(container):
+    repository = container.conversation_repository
+    submissions = await repository.list_submissions()
+    if submissions:
+        return
+
+    from uuid import uuid4
+    from datetime import datetime, timezone
+    from domain.knowledge.entities import KnowledgeSubmission, Document, Chunk
+    from domain.knowledge.value_objects import SubmitterRole, SubmissionStatus
+
+    for doc in INITIAL_KNOWLEDGE_DOCS:
+        sub_id = uuid4()
+        raw_content = f"# {doc['title']}\n\n{doc['content']}"
+        sub = KnowledgeSubmission(
+            id=sub_id,
+            submitted_by="system_seeder",
+            submitter_role=SubmitterRole.CAPTAIN,
+            raw_content=raw_content,
+            status=SubmissionStatus.APPROVED,
+            rule_results=[{"rule": "AutoSeeded", "outcome": "pass"}],
+            created_at=datetime.now(timezone.utc),
+            reviewed_by="captain",
+        )
+        await repository.save_submission(sub)
+
+        # Index into vector store as well
+        document = Document(id=sub_id, title=doc['title'], source_path=f"seed/{sub_id}")
+        chunk = Chunk(id=uuid4(), document_id=document.id, content=raw_content)
+        await container.vector_store.upsert(chunk)
+
+
 @router.get("/manage")
 async def list_manage_knowledge(
     x_user_role: str = Header(...),
@@ -415,6 +471,10 @@ async def list_manage_knowledge(
     repository = container.conversation_repository
 
     submissions = await repository.list_submissions()
+    if not submissions:
+        await _ensure_initial_knowledge_seeded(container)
+        submissions = await repository.list_submissions()
+
     items = [
         {
             "id": str(s.id),
@@ -492,3 +552,30 @@ async def delete_knowledge_item(
                 await session.delete(row)
 
     return {"status": "ok", "message": "Knowledge item deleted."}
+
+
+@router.get("/presets")
+async def get_knowledge_presets():
+    """Get dynamic preset queries derived ONLY from items present in Knowledge Management."""
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submissions = await repository.list_submissions()
+    if not submissions:
+        await _ensure_initial_knowledge_seeded(container)
+        submissions = await repository.list_submissions()
+
+    presets = []
+    for s in submissions:
+        lines = [line.strip('# ').strip() for line in s.raw_content.split('\n') if line.strip()]
+        if lines:
+            title = lines[0]
+            if len(title) > 60:
+                title = title[:57] + "..."
+            if title and title not in presets:
+                presets.append(title)
+
+    return {"presets": presets[:8]}
+
+

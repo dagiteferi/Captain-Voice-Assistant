@@ -335,6 +335,21 @@ class SQLiteConversationRepository:
                 )
             return submissions
 
+    async def list_document_titles(self) -> list[str]:
+        from adapters.outbound.persistence.models import KnowledgeDocumentModel
+        async with self._session_factory() as session:
+            result = await session.scalars(select(KnowledgeDocumentModel.title))
+            return list(result)
+
+    async def list_recent_commands(self, limit: int = 10) -> list:
+        from adapters.outbound.persistence.models import CommandModel
+        async with self._session_factory() as session:
+            result = await session.scalars(
+                select(CommandModel).order_by(CommandModel.created_at.desc()).limit(limit)
+            )
+            return [_command_from_row(r) for r in result]
+
+
 
 def _command_from_row(row: CommandModel) -> Command:
     command = Command(

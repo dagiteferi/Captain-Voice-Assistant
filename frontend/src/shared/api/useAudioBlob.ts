@@ -19,8 +19,8 @@ export function useAudioBlob(audioUrl?: string | null) {
 
     const fetchBlob = async () => {
       try {
-        const baseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-        const fullUrl = audioUrl.startsWith('http') ? audioUrl : `${baseUrl}${audioUrl}`
+        // Use relative URL so Vite proxy handles routing to backend
+        const fullUrl = audioUrl.startsWith('http') ? audioUrl : audioUrl
         const res = await fetch(fullUrl)
         if (!res.ok) throw new Error(`Failed to fetch audio (${res.status})`)
         const blob = await res.blob()

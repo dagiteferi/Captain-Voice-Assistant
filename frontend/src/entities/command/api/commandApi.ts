@@ -47,3 +47,27 @@ export async function retranslateCommand(
     role,
   })
 }
+
+export async function getKnowledgePresets(role: string): Promise<string[]> {
+  try {
+    const res = await fetchApi<{ presets: string[] }>('/api/v1/knowledge/presets', { role })
+    return res.presets || []
+  } catch {
+    return [
+      'Emergency Engine Shutdown Procedures',
+      'Fire Safety Protocol',
+      'Man Overboard (MOB) Procedures',
+    ]
+  }
+}
+
+export async function getRecentCommands(role: string): Promise<Array<{ command_id: string; input_text: string; status: string; created_at: string }>> {
+  try {
+    const res = await fetchApi<{ commands: Array<{ command_id: string; input_text: string; status: string; created_at: string }> }>('/api/v1/commands', { role })
+    return res.commands || []
+  } catch {
+    return []
+  }
+}
+
+

@@ -3,20 +3,34 @@ import { GitBranch, Clock, Radio, RefreshCw, ChevronRight, ChevronDown, Search }
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { PageShell } from './ConsolePage'
 import { useRole } from '@/shared/lib/roles'
-import { getCommandTrace } from '@/entities/command/api/commandApi'
+import { getCommandTrace, getRecentCommands } from '@/entities/command/api/commandApi'
 import type { TraceEvent } from '@/entities/command/model/types'
 
 export function TracePage() {
   const { role } = useRole()
-  const [selectedCommandId, setSelectedCommandId] = useState('cmd-101')
+  const [selectedCommandId, setSelectedCommandId] = useState('')
+  const [recentCommands, setRecentCommands] = useState<Array<{ command_id: string; input_text: string; status: string; created_at: string }>>([])
   const [events, setEvents] = useState<TraceEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [expandedIndices, setExpandedIndices] = useState<Record<number, boolean>>({ 0: true, 1: true })
   const [isLiveStreaming, setIsLiveStreaming] = useState(false)
 
+  useEffect(() => {
+    if (role === 'guest') return
+    getRecentCommands(role).then((cmds) => {
+      setRecentCommands(cmds)
+      if (cmds.length > 0 && !selectedCommandId) {
+        setSelectedCommandId(cmds[0].command_id)
+      }
+    })
+  }, [role])
+
   const loadTrace = async (cmdId: string) => {
-    if (!cmdId.trim()) return
+    if (!cmdId || !cmdId.trim()) {
+      setEvents([])
+      return
+    }
     setLoading(true)
     setErrorMsg(null)
     try {
@@ -31,8 +45,11 @@ export function TracePage() {
   }
 
   useEffect(() => {
-    loadTrace(selectedCommandId)
+    if (selectedCommandId) {
+      loadTrace(selectedCommandId)
+    }
   }, [selectedCommandId, role])
+
 
   useEffect(() => {
     if (!isLiveStreaming || !selectedCommandId.trim()) return
@@ -113,32 +130,44 @@ export function TracePage() {
       icon={GitBranch}
       title="Pipeline Trace Log"
       label="STAGE & EVENT DIAGNOSTICS"
-      badge={
-        <div className="flex items-center gap-1.5 text-emerald">
-          <Radio className="h-3.5 w-3.5 animate-pulse" />
-          <span className="mono text-xs">BACKEND CONNECTED</span>
-        </div>
-      }
     >
       <div className="space-y-4 animate-fade-in">
         {/* Controls Bar */}
         <div className="panel p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-base-800">
-          <div className="flex items-center gap-2 flex-1 max-w-md">
-            <Search className="h-3.5 w-3.5 text-text-muted" />
-            <input
-              type="text"
-              value={selectedCommandId}
-              onChange={(e) => setSelectedCommandId(e.target.value)}
-              placeholder="Enter command ID (e.g. cmd-101)..."
-              className="input-field text-xs font-mono py-1 flex-1"
-            />
-            <button
-              onClick={() => loadTrace(selectedCommandId)}
-              className="btn-primary text-xs py-1"
-            >
-              Fetch Trace
-            </button>
+          <div className="flex flex-wrap items-center gap-2 flex-1">
+            {recentCommands.length > 0 && (
+              <select
+                value={selectedCommandId}
+                onChange={(e) => setSelectedCommandId(e.target.value)}
+                className="bg-base-900 border border-border text-xs text-text-primary px-2.5 py-1.5 rounded font-mono outline-none max-w-[220px] truncate"
+              >
+                <option value="">Select Command...</option>
+                {recentCommands.map((cmd) => (
+                  <option key={cmd.command_id} value={cmd.command_id}>
+                    {cmd.input_text ? (cmd.input_text.length > 25 ? cmd.input_text.substring(0, 22) + '...' : cmd.input_text) : cmd.command_id}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <div className="flex items-center gap-2 flex-1 max-w-sm">
+              <Search className="h-3.5 w-3.5 text-text-muted" />
+              <input
+                type="text"
+                value={selectedCommandId}
+                onChange={(e) => setSelectedCommandId(e.target.value)}
+                placeholder="Enter Command ID UUID..."
+                className="input-field text-xs font-mono py-1 flex-1"
+              />
+              <button
+                onClick={() => loadTrace(selectedCommandId)}
+                className="btn-primary text-xs py-1"
+              >
+                Fetch Trace
+              </button>
+            </div>
           </div>
+
 
           <div className="flex items-center gap-2">
             <button

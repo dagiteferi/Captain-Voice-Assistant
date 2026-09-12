@@ -17,7 +17,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useRole } from '@/shared/lib/roles'
 import { useSettings, voiceForLanguage } from '@/shared/lib/useSettings'
 import { useAudioBlob } from '@/shared/api/useAudioBlob'
-import { submitCommand, getCommand, retranslateCommand } from '@/entities/command/api/commandApi'
+import { submitCommand, getCommand, retranslateCommand, getKnowledgePresets } from '@/entities/command/api/commandApi'
 import type { CommandResponse } from '@/entities/command/model/types'
 
 function withCacheBust(url: string | null | undefined): string | null {
@@ -83,6 +83,25 @@ export function ConsolePage() {
   useEffect(() => {
     persistedMessages = messages
   }, [messages])
+
+  const [presets, setPresets] = useState<string[]>([])
+
+  useEffect(() => {
+    getKnowledgePresets(role).then((dynamicPresets) => {
+      if (dynamicPresets && dynamicPresets.length > 0) {
+        setPresets(dynamicPresets)
+        const topTopics = dynamicPresets.slice(0, 3).join(', ')
+        const dynamicWelcome = `Welcome Captain. I am your RAG-powered Voice Intelligence Assistant grounded in: ${topTopics}. Ask any operational query or emergency procedure command below.`
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === 'welcome-1' ? { ...msg, text: dynamicWelcome } : msg
+          )
+        )
+      }
+    })
+  }, [role])
+
+
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend || inputText).trim()
@@ -270,11 +289,6 @@ export function ConsolePage() {
 
   const stages = ['Retrieving', 'Grounding', 'Translating', 'Synthesizing']
 
-  const presets = [
-    'Emergency main engine shutdown procedure',
-    'Fuel line pressure check and maintenance',
-    'Bilge pump emergency operating steps',
-  ]
 
   return (
     <PageShell
@@ -312,16 +326,20 @@ export function ConsolePage() {
 
             {messages.length > 1 && (
               <button
-                onClick={() =>
+                onClick={() => {
+                  const topTopics = presets.length > 0 ? presets.slice(0, 3).join(', ') : ''
+                  const dynamicText = topTopics
+                    ? `Welcome Captain. I am your RAG-powered Voice Intelligence Assistant grounded in: ${topTopics}. Ask any operational query or emergency procedure command below.`
+                    : 'Welcome Captain. Ask any operational query or emergency procedure command below.'
                   setMessages([
                     {
                       id: 'welcome-1',
                       sender: 'bot',
-                      text: 'Welcome Captain. Ask any operational query or emergency procedure command below.',
+                      text: dynamicText,
                       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     },
                   ])
-                }
+                }}
                 className="p-1.5 text-text-muted hover:text-rose transition-colors"
                 title="Clear Chat History"
               >
@@ -422,23 +440,6 @@ export function ConsolePage() {
           <div ref={chatEndRef} />
         </div>
 
-        {/* Preset Chips (If few messages) */}
-        {messages.length <= 2 && (
-          <div className="px-4 py-2 bg-base-800/40 border-t border-border-subtle flex flex-wrap gap-2 items-center">
-            <span className="text-[11px] text-text-muted mono flex items-center gap-1">
-              <Sparkles className="h-3 w-3 text-amber" /> Presets:
-            </span>
-            {presets.map((preset) => (
-              <button
-                key={preset}
-                onClick={() => handleSend(preset)}
-                className="text-xs py-1 px-2.5 bg-base-800 hover:bg-base-700 border border-border rounded text-text-secondary hover:text-text-primary transition-colors text-left"
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-        )}
 
         {/* Live Pipeline Execution Progress */}
         {isSubmitting && (
@@ -477,7 +478,7 @@ export function ConsolePage() {
           <button
             type="button"
             onClick={() =>
-              setInputText('What are the emergency engine shutdown procedures for Vessel Alpha?')
+              setInputText(presets.length > 0 ? presets[0] : 'What are the emergency engine shutdown procedures for Vessel Alpha?')
             }
             className="p-2 text-text-muted hover:text-amber transition-colors rounded hover:bg-base-700"
             title="Sample voice command"

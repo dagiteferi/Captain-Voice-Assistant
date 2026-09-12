@@ -102,20 +102,48 @@ class GetCommandResponse(BaseModel):
     completed_at: str | None = None
 
 
+@router.get("")
+async def list_recent_commands(
+    x_user_role: str = Header(...),
+    limit: int = 20,
+):
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    container = get_container()
+    commands = await container.conversation_repository.list_recent_commands(limit=limit)
+    items = [
+        {
+            "command_id": str(cmd.id),
+            "input_text": cmd.input_text,
+            "status": cmd.status.value,
+            "created_at": cmd.created_at.isoformat(),
+        }
+        for cmd in commands
+    ]
+    return {"commands": items}
+
+
 @router.get("/{command_id}")
 async def get_command(
-    command_id: UUID,
+    command_id: str,
     x_user_role: str = Header(...),
 ) -> GetCommandResponse:
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        cmd_uuid = UUID(command_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Command not found")
 
     from main import get_container
 
     container = get_container()
     repository = container.conversation_repository
 
-    command = await repository.get_command(command_id)
+    command = await repository.get_command(cmd_uuid)
     if command is None:
         raise HTTPException(status_code=404, detail="Command not found")
 
@@ -143,7 +171,7 @@ async def get_command(
 
     completed_at = None
     if command.status.value != "pending":
-        events = await repository.list_events(command_id)
+        events = await repository.list_events(cmd_uuid)
         if events:
             completed_at = events[-1].occurred_at.isoformat()
 
@@ -175,11 +203,16 @@ class TraceResponse(BaseModel):
 
 @router.get("/{command_id}/trace")
 async def get_command_trace(
-    command_id: UUID,
+    command_id: str,
     x_user_role: str = Header(...),
 ) -> TraceResponse:
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        cmd_uuid = UUID(command_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Command not found")
 
     from main import get_container
     import json
@@ -187,11 +220,11 @@ async def get_command_trace(
     container = get_container()
     repository = container.conversation_repository
 
-    command = await repository.get_command(command_id)
+    command = await repository.get_command(cmd_uuid)
     if command is None:
         raise HTTPException(status_code=404, detail="Command not found")
 
-    rows = await repository.list_events_with_ids(command_id)
+    rows = await repository.list_events_with_ids(cmd_uuid)
     trace_events = []
     for row in rows:
         payload = {}
@@ -207,28 +240,33 @@ async def get_command_trace(
             )
         )
 
-    return TraceResponse(command_id=command_id, events=trace_events)
+    return TraceResponse(command_id=cmd_uuid, events=trace_events)
 
 
 @router.get("/{command_id}/stream")
 async def stream_command_trace(
-    command_id: UUID,
+    command_id: str,
     x_user_role: str = Header(...),
     since_event_id: UUID | None = Query(None, alias="since_event_id"),
 ):
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
+    try:
+        cmd_uuid = UUID(command_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Command not found")
+
     from main import get_container
 
     container = get_container()
-    command = await container.conversation_repository.get_command(command_id)
+    command = await container.conversation_repository.get_command(cmd_uuid)
     if command is None:
         raise HTTPException(status_code=404, detail="Command not found")
 
     from adapters.inbound.api.sse import stream_events
 
-    return await stream_events(command_id, since_event_id=since_event_id)
+    return await stream_events(cmd_uuid, since_event_id=since_event_id)
 
 
 class RetranslateRequest(BaseModel):
@@ -237,10 +275,18 @@ class RetranslateRequest(BaseModel):
 
 @router.post("/{command_id}/retranslate")
 async def retranslate_command(
-    command_id: UUID,
+    command_id: str,
     request: RetranslateRequest,
     x_user_role: str = Header(...),
 ):
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        cmd_uuid = UUID(command_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Command not found")
+
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -252,7 +298,7 @@ async def retranslate_command(
     from main import get_container
 
     container = get_container()
-    command = await container.conversation_repository.get_command(command_id)
+    command = await container.conversation_repository.get_command(cmd_uuid)
     if command is None or not command.grounded_answer:
         raise HTTPException(status_code=404, detail="Command or answer not found")
 
