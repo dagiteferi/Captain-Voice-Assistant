@@ -27,7 +27,10 @@ class ChunkRef:
     chunk_id: UUID
     document_id: UUID
     content: str
+    # Ranking score: the best of embedding and keyword match, with boosts.
     similarity_score: float = 0.0
+    # Plain embedding cosine, for judging how alike two texts actually are.
+    cosine_score: float = 0.0
 
 
 @dataclass(frozen=True)

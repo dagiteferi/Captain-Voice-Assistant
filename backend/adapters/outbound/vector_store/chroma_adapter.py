@@ -73,6 +73,7 @@ class ChromaVectorStoreAdapter:
                         document_id=document_id,
                         content=content,
                         similarity_score=combined,
+                        cosine_score=cosine,
                     ),
                 )
             )

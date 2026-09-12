@@ -73,6 +73,8 @@ class SubmitKnowledgeResponse(BaseModel):
     submission_id: UUID
     status: str
     rule_results: list[RuleResultItem]
+    # How many chunks were indexed — also how many embedding requests it cost.
+    indexed_chunks: int = 0
 
 
 @router.post("/submissions", status_code=status.HTTP_201_CREATED)
@@ -299,8 +301,11 @@ async def _process_and_save_submission(
         raw_content=raw_content,
     )
 
+    # Duplicate detection wants "how alike is this text", which is the cosine,
+    # not the keyword-boosted ranking score that made every long upload look
+    # like a perfect duplicate.
     hits = await container.vector_store.search(raw_content, limit=1)
-    max_similarity = hits[0].similarity_score if hits else 0.0
+    max_similarity = hits[0].cosine_score if hits else 0.0
     status_result, rule_results = evaluate_submission(
         submission,
         submitter_role,
@@ -309,12 +314,14 @@ async def _process_and_save_submission(
     submission.status = status_result
     submission.record_rule_results(rule_results)
 
+    indexed_chunks = 0
     if status_result.value == "approved":
-        await upsert_submission_chunk(
+        chunks = await upsert_submission_chunk(
             container.vector_store,
             submission,
             title=f"{title_prefix} {submission.id}",
         )
+        indexed_chunks = len(chunks)
         submission.mark_indexed()
 
     await repository.save_submission(submission)
@@ -323,6 +330,7 @@ async def _process_and_save_submission(
         submission_id=submission.id,
         status=status_result.value,
         rule_results=[RuleResultItem(**r) for r in rule_results],
+        indexed_chunks=indexed_chunks,
     )
 
 

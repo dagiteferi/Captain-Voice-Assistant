@@ -35,6 +35,7 @@ export function SubmitKnowledgePage() {
     submission_id: string
     status: string
     rule_results: RuleResult[]
+    indexed_chunks?: number
   } | null>(null)
 
   const handleAddStep = () => {
@@ -410,6 +411,14 @@ export function SubmitKnowledgePage() {
               <div className="text-xs text-text-muted mono uppercase">Rule Evaluation Breakdown</div>
               <RuleResultChecklist results={result.rule_results} />
             </div>
+
+            {result.indexed_chunks ? (
+              <div className="text-xs text-text-muted border-t border-border-subtle pt-3">
+                Indexed as <span className="text-text-primary mono">{result.indexed_chunks}</span>{' '}
+                {result.indexed_chunks === 1 ? 'chunk' : 'chunks'} — long documents are split so
+                each fact stays findable. Each chunk costs one embedding request.
+              </div>
+            ) : null}
           </div>
         )}
       </div>
