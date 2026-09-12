@@ -58,3 +58,32 @@ class ChromaVectorStoreAdapter:
                 )
             )
         return hits
+
+    async def delete_by_document_id(self, document_id: UUID) -> None:
+        """Delete all chunks associated with a document_id from vector store."""
+        try:
+            self._collection.delete(where={"document_id": str(document_id)})
+        except Exception:
+            pass
+
+    async def delete_chunk(self, chunk_id: UUID) -> None:
+        """Delete a single chunk by chunk_id from vector store."""
+        try:
+            self._collection.delete(ids=[str(chunk_id)])
+        except Exception:
+            pass
+
+    async def list_all_chunks() -> list[dict]:
+        """List all indexed items in the Chroma vector store."""
+        count = self._collection.count()
+        if count == 0:
+            return []
+        result = self._collection.get(include=["documents", "metadatas"])
+        items = []
+        for cid, doc_text, meta in zip(result["ids"], result["documents"], result["metadatas"]):
+            items.append({
+                "chunk_id": cid,
+                "document_id": meta.get("document_id") if meta else None,
+                "content": doc_text,
+            })
+        return items

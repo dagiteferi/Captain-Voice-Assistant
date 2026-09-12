@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   Radio,
   Circle,
+  Database,
 } from 'lucide-react'
 import { RoleSwitcher, RoleBadge } from '@/shared/ui/RoleBadge'
 import { useRole } from '@/shared/lib/roles'
@@ -23,6 +24,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/console', label: 'Console', icon: Terminal },
   { to: '/trace', label: 'Trace', icon: GitBranch },
   { to: '/submit-knowledge', label: 'Submit Knowledge', icon: BookOpen },
+  { to: '/manage-knowledge', label: 'Manage Knowledge', icon: Database },
   {
     to: '/review-queue',
     label: 'Review Queue',
@@ -31,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
     tooltip: 'Captain access only',
   },
 ]
+
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { role } = useRole()

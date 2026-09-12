@@ -396,3 +396,99 @@ async def reject_submission(
     await repository.save_submission(submission)
 
     return RejectSubmissionResponse(id=submission.id, status=submission.status.value, reason=request.reason)
+
+
+class UpdateSubmissionRequest(BaseModel):
+    raw_content: str
+
+
+@router.get("/manage")
+async def list_manage_knowledge(
+    x_user_role: str = Header(...),
+):
+    """List all knowledge base items for management (Captain & Crew)."""
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submissions = await repository.list_submissions()
+    items = [
+        {
+            "id": str(s.id),
+            "submitted_by": s.submitted_by,
+            "submitter_role": s.submitter_role.value,
+            "raw_content": s.raw_content,
+            "status": s.status.value,
+            "created_at": s.created_at.isoformat(),
+        }
+        for s in submissions
+    ]
+    return {"items": items, "count": len(items)}
+
+
+@router.put("/manage/{submission_id}")
+async def update_knowledge_item(
+    submission_id: UUID,
+    request: UpdateSubmissionRequest,
+    x_user_role: str = Header(...),
+):
+    """Update knowledge item content and re-index in vector store."""
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    from domain.knowledge.entities import Document, Chunk
+    from uuid import uuid4
+
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+
+    submission.raw_content = request.raw_content.strip()
+    await repository.save_submission(submission)
+
+    # Re-index in Chroma vector store if approved
+    if submission.status.value == "approved":
+        await container.vector_store.delete_by_document_id(submission.id)
+        doc = Document(id=submission.id, title=f"Submission {submission.id}", source_path=f"submissions/{submission.id}")
+        chunk = Chunk(id=uuid4(), document_id=doc.id, content=submission.raw_content)
+        await container.vector_store.upsert(chunk)
+
+    return {"status": "ok", "message": "Knowledge item updated and re-indexed."}
+
+
+@router.delete("/manage/{submission_id}")
+async def delete_knowledge_item(
+    submission_id: UUID,
+    x_user_role: str = Header(...),
+):
+    """Delete knowledge item from DB and remove its vector embeddings."""
+    if x_user_role != "captain":
+        raise HTTPException(status_code=403, detail="Only captain can delete knowledge items")
+
+    from main import get_container
+    container = get_container()
+    repository = container.conversation_repository
+
+    submission = await repository.get_submission(submission_id)
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Knowledge item not found")
+
+    # Remove embeddings from vector store
+    await container.vector_store.delete_by_document_id(submission.id)
+
+    # Delete row from DB
+    async with repository._session_factory() as session:
+        async with session.begin():
+            from adapters.outbound.persistence.models import KnowledgeSubmissionModel
+            row = await session.get(KnowledgeSubmissionModel, submission_id)
+            if row:
+                await session.delete(row)
+
+    return {"status": "ok", "message": "Knowledge item deleted."}

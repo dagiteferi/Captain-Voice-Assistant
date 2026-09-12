@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   Terminal,
   Send,
@@ -6,14 +6,26 @@ import {
   BookOpen,
   Globe,
   Loader2,
-  History,
   Sparkles,
+  Bot,
+  User,
+  Trash2,
 } from 'lucide-react'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useRole } from '@/shared/lib/roles'
 import { AudioPlayer } from '@/features/audio-player/ui/AudioPlayer'
 import { submitCommand, getCommand } from '@/entities/command/api/commandApi'
 import type { CommandResponse } from '@/entities/command/model/types'
+
+interface ChatMessage {
+  id: string
+  sender: 'user' | 'bot'
+  text: string
+  timestamp: string
+  command?: CommandResponse
+  isPending?: boolean
+  error?: string
+}
 
 export function ConsolePage() {
   const { role } = useRole()
@@ -23,9 +35,24 @@ export function ConsolePage() {
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentStage, setCurrentStage] = useState<number>(-1)
-  const [activeCommand, setActiveCommand] = useState<CommandResponse | null>(null)
-  const [historyList, setHistoryList] = useState<CommandResponse[]>([])
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: 'welcome-1',
+      sender: 'bot',
+      text: 'Welcome Captain. I am your RAG-powered Maritime Voice Intelligence Assistant. Ask any operational query or emergency procedure command below.',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    },
+  ])
+
+  const chatEndRef = useRef<HTMLDivElement | null>(null)
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, isSubmitting])
 
   if (role === 'guest') {
     return (
@@ -46,28 +73,46 @@ export function ConsolePage() {
     )
   }
 
-  const handleSubmit = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault()
-    if (!inputText.trim() || isSubmitting) return
+  const handleSend = async (textToSend?: string) => {
+    const text = (textToSend || inputText).trim()
+    if (!text || isSubmitting) return
 
+    const userMsgId = `user-${Date.now()}`
+    const botMsgId = `bot-${Date.now()}`
+
+    const userMessage: ChatMessage = {
+      id: userMsgId,
+      sender: 'user',
+      text,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }
+
+    const pendingBotMessage: ChatMessage = {
+      id: botMsgId,
+      sender: 'bot',
+      text: '',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      isPending: true,
+    }
+
+    setMessages((prev) => [...prev, userMessage, pendingBotMessage])
+    if (!textToSend) setInputText('')
     setIsSubmitting(true)
-    setErrorMsg(null)
     setCurrentStage(0) // Retrieving
 
     try {
       const res = await submitCommand(
         {
-          input_text: inputText.trim(),
+          input_text: text,
           target_language: targetLanguage,
         },
         role,
       )
 
-      // Poll real backend for command completion (2s intervals, up to 60 attempts = 2 min)
       let attempts = 0
       const pollTimer = setInterval(async () => {
         attempts++
-        if (attempts <= 3) setCurrentStage(0)  // Retrieving
+        if (attempts <= 3) setCurrentStage(0) // Retrieving
         else if (attempts <= 8) setCurrentStage(1) // Grounding
         else if (attempts <= 15) setCurrentStage(2) // Translating
         else setCurrentStage(3) // Synthesizing
@@ -76,289 +121,320 @@ export function ConsolePage() {
           const fullCmd = await getCommand(res.command_id, role)
           if (fullCmd.status !== 'pending' || attempts >= 60) {
             clearInterval(pollTimer)
-            setActiveCommand(fullCmd)
-            setHistoryList((prev) => [fullCmd, ...prev.filter((c) => c.command_id !== fullCmd.command_id)])
             setIsSubmitting(false)
             setCurrentStage(-1)
-            setInputText('')
+
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMsgId
+                  ? {
+                      ...msg,
+                      text: fullCmd.answer_text || 'No answer returned by pipeline.',
+                      command: fullCmd,
+                      isPending: false,
+                    }
+                  : msg,
+              ),
+            )
           }
         } catch (err: unknown) {
           if (attempts >= 60) {
             clearInterval(pollTimer)
             setIsSubmitting(false)
             setCurrentStage(-1)
-            setErrorMsg(err instanceof Error ? err.message : 'Polling failed')
+
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === botMsgId
+                  ? {
+                      ...msg,
+                      text: 'Error processing command.',
+                      error: err instanceof Error ? err.message : 'Polling failed',
+                      isPending: false,
+                    }
+                  : msg,
+              ),
+            )
           }
         }
       }, 2000)
     } catch (err: unknown) {
       setIsSubmitting(false)
       setCurrentStage(-1)
-      setErrorMsg(err instanceof Error ? err.message : 'Command submission failed')
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMsgId
+            ? {
+                ...msg,
+                text: 'Command submission failed.',
+                error: err instanceof Error ? err.message : 'Failed to reach server',
+                isPending: false,
+              }
+            : msg,
+        ),
+      )
     }
   }
 
   const stages = ['Retrieving', 'Grounding', 'Translating', 'Synthesizing']
 
+  const presets = [
+    'Emergency main engine shutdown procedure',
+    'Fuel line pressure check and maintenance',
+    'Bilge pump emergency operating steps',
+  ]
+
   return (
     <PageShell
       icon={Terminal}
       title="Command Console"
-      label="VOICE COMMAND INTERFACE"
-      badge={
-        activeCommand ? (
-          <StatusBadge status={activeCommand.status} size="sm" />
-        ) : (
-          <StatusBadge status="pending" size="sm" />
-        )
-      }
+      label="VOICE & RAG CHAT ASSISTANT"
+      badge={<span className="mono text-[11px] px-2 py-0.5 rounded bg-amber/10 border border-amber/30 text-amber font-medium uppercase">{role} ROLE</span>}
     >
-      <div className="space-y-4 animate-fade-in">
-        {/* Error Alert if real API call fails */}
-        {errorMsg && (
-          <div className="p-4 rounded-sm bg-rose/10 border border-rose/30 flex items-start gap-3">
-            <Sparkles className="h-5 w-5 text-rose flex-shrink-0" />
-            <div className="space-y-1">
-              <h3 className="text-sm font-semibold text-rose">Command Execution Failed</h3>
-              <p className="text-xs text-rose/80 font-mono">{errorMsg}</p>
+      <div className="flex flex-col h-[calc(100vh-140px)] max-w-4xl mx-auto bg-base-900 border border-border rounded-sm shadow-lg overflow-hidden">
+        {/* Header / Top Toolbar */}
+        <div className="flex items-center justify-between px-4 py-3 bg-base-800 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 text-amber" />
+            <div>
+              <h2 className="text-sm font-semibold text-text-primary">Captain Voice AI Assistant</h2>
+              <p className="text-[10px] text-text-muted mono">RAG Pipeline + Translation + Voice Synthesis</p>
             </div>
           </div>
-        )}
 
-        {/* Command Form Panel */}
-        <div className="panel p-4 space-y-3 border-l-2 border-l-amber">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Sparkles className="h-4 w-4 text-amber" />
-              <p className="label-caps">Submit Voice / Text Command</p>
-            </div>
-            <span className="mono text-[11px] text-text-muted">
-              Role Header: <span className="text-amber uppercase font-semibold">{role}</span>
-            </span>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="relative">
-              <textarea
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Ask maritime query or operational command (e.g., 'What are the emergency engine shutdown procedures?')..."
-                className="input-field w-full h-24 resize-none pr-12 focus:border-amber transition-all"
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 bg-base-900 px-2.5 py-1 rounded border border-border">
+              <Globe className="h-3.5 w-3.5 text-sky" />
+              <span className="mono text-xs text-text-secondary">Language:</span>
+              <select
+                value={targetLanguage}
+                onChange={(e) => setTargetLanguage(e.target.value)}
+                className="bg-transparent text-xs text-text-primary outline-none cursor-pointer"
                 disabled={isSubmitting}
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  setInputText(
-                    'What are the emergency engine shutdown procedures for Vessel Alpha?',
-                  )
-                }
-                className="absolute right-3 top-3 p-1.5 rounded text-text-muted hover:text-amber transition-colors"
-                title="Use voice input simulation preset"
               >
-                <Mic className="h-4 w-4" />
+                <option value="am">am — Amharic (አማርኛ)</option>
+                <option value="en">en — English</option>
+                <option value="fr">fr — French</option>
+              </select>
+            </div>
+
+            {messages.length > 1 && (
+              <button
+                onClick={() =>
+                  setMessages([
+                    {
+                      id: 'welcome-1',
+                      sender: 'bot',
+                      text: 'Welcome Captain. Ask any operational query or emergency procedure command below.',
+                      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    },
+                  ])
+                }
+                className="p-1.5 text-text-muted hover:text-rose transition-colors"
+                title="Clear Chat History"
+              >
+                <Trash2 className="h-4 w-4" />
               </button>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Globe className="h-3.5 w-3.5 text-text-secondary" />
-                <span className="mono text-xs text-text-secondary">Target Language:</span>
-                <select
-                  value={targetLanguage}
-                  onChange={(e) => setTargetLanguage(e.target.value)}
-                  className="input-field py-1 text-xs"
-                  disabled={isSubmitting}
-                >
-                  <option value="am">am — Amharic (አማርኛ)</option>
-                  <option value="en">en — English</option>
-                  <option value="fr">fr — French</option>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="submit"
-                  disabled={!inputText.trim() || isSubmitting}
-                  className="btn-primary"
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      Executing Pipeline...
-                    </>
-                  ) : (
-                    <>
-                      <Send className="h-3.5 w-3.5" />
-                      Submit Command
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </form>
-
-          {/* Pipeline stage tracker during submission */}
-          {isSubmitting && (
-            <div className="pt-3 border-t border-border-subtle space-y-2">
-              <p className="label-caps text-sky">Live Backend Pipeline Execution Active</p>
-              <div className="flex items-center justify-between">
-                {stages.map((st, idx) => {
-                  const isDone = idx < currentStage
-                  const isActive = idx === currentStage
-                  return (
-                    <div key={st} className="flex items-center gap-1.5">
-                      <div
-                        className={`w-2.5 h-2.5 rounded-full ${
-                          isDone
-                            ? 'bg-amber'
-                            : isActive
-                            ? 'bg-sky animate-ping'
-                            : 'bg-base-600'
-                        }`}
-                      />
-                      <span
-                        className={`mono text-[11px] ${
-                          isDone
-                            ? 'text-amber'
-                            : isActive
-                            ? 'text-sky font-semibold'
-                            : 'text-text-muted'
-                        }`}
-                      >
-                        {st}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
-        {/* Active Response Display */}
-        {activeCommand ? (
-          <div className="panel p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="mono text-xs text-text-muted font-mono">
-                    ID: {activeCommand.command_id}
-                  </span>
-                  <StatusBadge status={activeCommand.status} />
-                </div>
-                <h2 className="text-base font-semibold text-text-primary">
-                  "{activeCommand.input_text}"
-                </h2>
+        {/* Chat Message Scrollable Stream */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-base-900/50">
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-3 max-w-[85%] ${
+                msg.sender === 'user' ? 'ml-auto flex-row-reverse' : 'mr-auto'
+              }`}
+            >
+              {/* Avatar Icon */}
+              <div
+                className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold ${
+                  msg.sender === 'user'
+                    ? 'bg-amber text-base-900'
+                    : 'bg-sky/20 border border-sky/40 text-sky'
+                }`}
+              >
+                {msg.sender === 'user' ? <User className="h-4 w-4" /> : <Bot className="h-4 w-4" />}
               </div>
-              <span className="mono text-[11px] text-text-muted">
-                {new Date(activeCommand.created_at).toLocaleTimeString()}
-              </span>
-            </div>
 
-            {/* Answer Text */}
-            <div className="space-y-2">
-              <p className="label-caps">Grounded Response</p>
-              <div className="p-3.5 rounded bg-base-900 border border-border text-sm text-text-primary leading-relaxed">
-                {activeCommand.answer_text || 'No answer returned by pipeline.'}
-              </div>
-            </div>
-
-            {/* Citations list */}
-            {activeCommand.citations && activeCommand.citations.length > 0 && (
+              {/* Message Content Bubble */}
               <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <BookOpen className="h-3.5 w-3.5 text-amber" />
-                  <p className="label-caps">Knowledge Base Citations</p>
-                </div>
-                <div className="grid gap-2 sm:grid-cols-2">
-                  {activeCommand.citations.map((c) => (
-                    <div
-                      key={c.chunk_id}
-                      className="p-2.5 rounded bg-base-800 border border-border-subtle flex items-start justify-between gap-2"
-                    >
-                      <div className="space-y-0.5 min-w-0">
-                        <p className="text-xs font-medium text-text-primary truncate">
-                          {c.document_title}
-                        </p>
-                        <p className="mono text-[10px] text-text-muted">
-                          Chunk: {c.chunk_id}
-                        </p>
-                      </div>
-                      <span className="mono text-[11px] px-1.5 py-0.5 rounded bg-amber/10 border border-amber/30 text-amber font-medium">
-                        {c.similarity_score != null ? `${(c.similarity_score * 100).toFixed(0)}%` : '–'} sim
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Translation output */}
-            {activeCommand.translated_text && (
-              <div className="space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <Globe className="h-3.5 w-3.5 text-sky" />
-                  <p className="label-caps">Translated Output ({activeCommand.target_language})</p>
-                </div>
-                <div className="p-3 rounded bg-base-800/80 border border-sky/30 text-sm text-sky font-medium leading-relaxed">
-                  {activeCommand.translated_text}
-                </div>
-              </div>
-            )}
-
-            {/* Synthesized Audio Player */}
-            <div className="pt-2">
-              <AudioPlayer
-                audioUrl={activeCommand.audio_url}
-                title={`Synthesized Response (${activeCommand.target_language.toUpperCase()})`}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="panel p-12 text-center border border-dashed border-border-subtle bg-base-800/50 flex flex-col items-center justify-center gap-3">
-            <Terminal className="h-8 w-8 text-text-muted" />
-            <p className="text-text-muted text-sm font-medium">No command executed yet</p>
-            <p className="text-text-secondary text-xs max-w-sm">Submit a command above to see the real backend response and knowledge citations.</p>
-          </div>
-        )}
-
-        {/* History List */}
-        {historyList.length > 0 && (
-          <div className="panel p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <History className="h-4 w-4 text-text-secondary" />
-              <p className="label-caps">Session Command History</p>
-            </div>
-
-            <div className="divide-y divide-border-subtle">
-              {historyList.map((item) => (
                 <div
-                  key={item.command_id}
-                  onClick={() => setActiveCommand(item)}
-                  className={`py-2.5 px-2 rounded cursor-pointer transition-colors flex items-center justify-between gap-3 ${
-                    activeCommand?.command_id === item.command_id
-                      ? 'bg-base-700/60'
-                      : 'hover:bg-base-800'
+                  className={`p-3.5 rounded-lg text-sm leading-relaxed ${
+                    msg.sender === 'user'
+                      ? 'bg-amber text-base-900 font-medium rounded-tr-none'
+                      : 'bg-base-800 border border-border text-text-primary rounded-tl-none'
                   }`}
                 >
-                  <div className="space-y-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="mono text-[11px] text-text-muted">{item.command_id}</span>
-                      <StatusBadge status={item.status} size="sm" />
+                  {msg.isPending ? (
+                    <div className="flex items-center gap-2 py-1">
+                      <Loader2 className="h-4 w-4 animate-spin text-amber" />
+                      <span className="text-xs text-text-secondary">Generating grounded response & voice output...</span>
                     </div>
-                    <p className="text-xs text-text-primary truncate font-medium">
-                      {item.input_text}
-                    </p>
+                  ) : (
+                    <p className="whitespace-pre-wrap">{msg.text}</p>
+                  )}
+
+                  {msg.error && (
+                    <div className="mt-2 p-2 bg-rose/10 border border-rose/30 rounded text-rose text-xs">
+                      {msg.error}
+                    </div>
+                  )}
+
+                  {/* Timestamp */}
+                  <div
+                    className={`text-[10px] mono mt-1 text-right ${
+                      msg.sender === 'user' ? 'text-base-900/70' : 'text-text-muted'
+                    }`}
+                  >
+                    {msg.timestamp}
                   </div>
-                  <span className="mono text-[10px] text-text-muted whitespace-nowrap">
-                    {new Date(item.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
                 </div>
-              ))}
+
+                {/* Extended Details for Bot Message */}
+                {msg.command && (
+                  <div className="space-y-3 p-3 bg-base-800/80 border border-border rounded-lg text-xs">
+                    {/* Citations */}
+                    {msg.command.citations && msg.command.citations.length > 0 && (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center gap-1 text-[11px] font-semibold text-amber">
+                          <BookOpen className="h-3.5 w-3.5" />
+                          <span>Knowledge Base Citations</span>
+                        </div>
+                        <div className="grid gap-1.5">
+                          {msg.command.citations.map((c) => (
+                            <div
+                              key={c.chunk_id}
+                              className="p-2 bg-base-900 border border-border-subtle rounded flex items-center justify-between text-text-secondary text-[11px]"
+                            >
+                              <span className="truncate">{c.document_title || `Chunk ${c.chunk_id.slice(0, 8)}`}</span>
+                              <span className="mono text-[10px] text-amber">RAG Match</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Translation */}
+                    {msg.command.translated_text && (
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1 text-[11px] font-semibold text-sky">
+                          <Globe className="h-3.5 w-3.5" />
+                          <span>Translated Output ({msg.command.target_language.toUpperCase()})</span>
+                        </div>
+                        <div className="p-2.5 bg-sky/10 border border-sky/20 rounded text-sky leading-relaxed font-sans">
+                          {msg.command.translated_text}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Synthesized Voice Player */}
+                    {msg.command.audio_url && (
+                      <div className="pt-1">
+                        <AudioPlayer
+                          audioUrl={msg.command.audio_url}
+                          title={`Voice Response (${msg.command.target_language.toUpperCase()})`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Preset Chips (If few messages) */}
+        {messages.length <= 2 && (
+          <div className="px-4 py-2 bg-base-800/40 border-t border-border-subtle flex flex-wrap gap-2 items-center">
+            <span className="text-[11px] text-text-muted mono flex items-center gap-1">
+              <Sparkles className="h-3 w-3 text-amber" /> Presets:
+            </span>
+            {presets.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => handleSend(preset)}
+                className="text-xs py-1 px-2.5 bg-base-800 hover:bg-base-700 border border-border rounded text-text-secondary hover:text-text-primary transition-colors text-left"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Live Pipeline Execution Progress */}
+        {isSubmitting && (
+          <div className="px-4 py-2 bg-base-800 border-t border-border flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-3.5 w-3.5 text-sky animate-spin" />
+              <span className="mono text-xs text-sky font-semibold">Live Backend Pipeline Active:</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {stages.map((st, idx) => {
+                const isDone = idx < currentStage
+                const isActive = idx === currentStage
+                return (
+                  <div key={st} className="flex items-center gap-1">
+                    <div
+                      className={`w-2 h-2 rounded-full ${
+                        isDone ? 'bg-amber' : isActive ? 'bg-sky animate-ping' : 'bg-base-600'
+                      }`}
+                    />
+                    <span
+                      className={`mono text-[10px] ${
+                        isDone ? 'text-amber' : isActive ? 'text-sky font-bold' : 'text-text-muted'
+                      }`}
+                    >
+                      {st}
+                    </span>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
+
+        {/* Fixed Bottom Input Bar */}
+        <div className="p-3 bg-base-800 border-t border-border flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() =>
+              setInputText('What are the emergency engine shutdown procedures for Vessel Alpha?')
+            }
+            className="p-2 text-text-muted hover:text-amber transition-colors rounded hover:bg-base-700"
+            title="Sample voice command"
+          >
+            <Mic className="h-4 w-4" />
+          </button>
+
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSend()}
+            placeholder="Type your command or query here (e.g. 'What is the emergency engine procedure?')..."
+            className="flex-1 bg-base-900 border border-border rounded p-2.5 text-sm text-text-primary focus:border-amber focus:ring-1 focus:ring-amber outline-none"
+            disabled={isSubmitting}
+          />
+
+          <button
+            type="button"
+            onClick={() => handleSend()}
+            disabled={!inputText.trim() || isSubmitting}
+            className="btn-primary py-2.5 px-4"
+          >
+            {isSubmitting ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="h-4 w-4" />
+            )}
+          </button>
+        </div>
       </div>
     </PageShell>
   )
