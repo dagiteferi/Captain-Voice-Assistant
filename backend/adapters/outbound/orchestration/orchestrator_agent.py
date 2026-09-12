@@ -154,7 +154,7 @@ class FlatLangGraphOrchestrator:
                 previous = merged.get(chunk.chunk_id)
                 if previous is None or chunk.similarity_score > previous.similarity_score:
                     merged[chunk.chunk_id] = chunk
-        chunks = sorted(merged.values(), key=lambda item: item.similarity_score, reverse=True)[:8]
+        chunks = sorted(merged.values(), key=lambda item: item.similarity_score, reverse=True)[:12]
         state.retrieved_chunks = chunks
 
         event = RetrievalCompleted(
@@ -175,32 +175,62 @@ class FlatLangGraphOrchestrator:
 
     async def _node_generate(self, state: PipelineState) -> dict:
         """Generate an answer grounded in retrieved chunks."""
-        prompt = f"""Answer the following query using ONLY the provided documents.
-First-person statements (for example "I was born") in the documents are facts about Dagmawi Teferi (also called Dagi).
-If the documents contain the answer, state it clearly. If they truly do not, say you do not have that information.
-Do not include source citations in your answer.
-Query: {state.command.input_text}
-Documents:
-{chr(10).join(f'- {c.content}' for c in state.retrieved_chunks)}
-Answer:"""
+        from application.knowledge.grounding import (
+            build_generate_prompt,
+            extractive_answer,
+            looks_like_refusal,
+            select_evidence_chunks,
+        )
+
+        evidence = select_evidence_chunks(
+            state.command.input_text,
+            state.retrieved_chunks,
+            limit=4,
+        )
+        if not evidence:
+            return {
+                "grounded_answer": None,
+                "fallback_reason": "No knowledge-base passages retrieved",
+            }
+
+        system_prompt = (
+            "You answer strictly from the given knowledge-base documents. "
+            "When a document has the answer, report those exact facts. "
+            "Never claim the information is missing if it appears in any document."
+        )
 
         try:
             answer_text = await self.llm_port.generate(
-                query=prompt,
-                chunks=state.retrieved_chunks,
-                system_prompt=(
-                    "You are a helpful assistant. Answer using only the provided documents. "
-                    "Treat newly added knowledge facts as authoritative."
-                ),
+                query=build_generate_prompt(state.command.input_text, evidence),
+                chunks=evidence,
+                system_prompt=system_prompt,
             )
+            if looks_like_refusal(answer_text) and len(evidence) > 1:
+                logger.warning(
+                    "[generate] Model refused despite retrieved docs; retrying with top evidence only."
+                )
+                answer_text = await self.llm_port.generate(
+                    query=build_generate_prompt(state.command.input_text, evidence[:2]),
+                    chunks=evidence[:2],
+                    system_prompt=system_prompt,
+                )
+            if looks_like_refusal(answer_text):
+                extracted = extractive_answer(state.command.input_text, evidence)
+                if extracted:
+                    logger.info("[generate] Using exact knowledge-base passage after model refusal.")
+                    answer_text = extracted
         except Exception as exc:
             logger.error("[generate] LLM failed: %s", exc)
-            return {
-                "grounded_answer": None,
-                "fallback_reason": f"Answer generation failed: {exc}",
-            }
+            extracted = extractive_answer(state.command.input_text, evidence)
+            if extracted:
+                answer_text = extracted
+            else:
+                return {
+                    "grounded_answer": None,
+                    "fallback_reason": f"Answer generation failed: {exc}",
+                }
 
-        citations = [Citation(chunk_id=c.chunk_id) for c in state.retrieved_chunks]
+        citations = [Citation(chunk_id=c.chunk_id) for c in evidence]
         grounded_answer = GroundedAnswer(
             command_id=state.command.id,
             answer_text=answer_text,

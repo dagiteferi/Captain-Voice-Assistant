@@ -65,8 +65,9 @@ def expand_search_queries(query: str) -> list[str]:
     lowered = q.lower()
     if "dagi" in lowered and "dagmawi" not in lowered:
         queries.append(re.sub(r"dagi", PROFILE_SUBJECT, q, flags=re.IGNORECASE))
-    if any(token in lowered for token in ("born", "birth", "birthday", "age")):
-        queries.append(f"{PROFILE_SUBJECT} was born birthplace year of birth")
+    tokens = [token for token in query_tokens(q) if token not in {"dagi", "dagmawi", "teferi"}]
+    if tokens:
+        queries.append(f"{PROFILE_SUBJECT} {' '.join(tokens)}")
     seen: list[str] = []
     for item in queries:
         if item not in seen:

@@ -50,8 +50,8 @@ class GeminiLLMAdapter:
         payload = {
             "contents": contents,
             "generationConfig": {
-                "temperature": 0.1,
-                "maxOutputTokens": 400,
+                "temperature": 0.0,
+                "maxOutputTokens": 500,
             },
         }
 

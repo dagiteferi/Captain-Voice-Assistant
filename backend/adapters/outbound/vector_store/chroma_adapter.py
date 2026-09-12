@@ -62,8 +62,9 @@ class ChromaVectorStoreAdapter:
                 continue
             document_id = UUID(str(metadata["document_id"]))
             cosine = max(0.0, 1.0 - float(distance))
-            lexical = lexical_overlap_score(query, content)
-            combined = 0.5 * cosine + 0.5 * min(lexical, 1.0)
+            lexical = min(lexical_overlap_score(query, content), 1.0)
+            # Keyword hits must be able to outrank long but weakly related CV chunks.
+            combined = max(cosine, lexical)
             ranked.append(
                 (
                     combined,
