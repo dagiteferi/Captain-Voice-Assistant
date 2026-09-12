@@ -130,7 +130,7 @@ python tools/seed_knowledge.py
 
 Output:
 ```
-✓ Successfully ingested 15 documents!
+✓ Successfully ingested 20 documents!
 ```
 
 ### 5. Start Frontend

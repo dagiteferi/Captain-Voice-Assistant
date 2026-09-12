@@ -44,7 +44,7 @@ function welcomeMessage(): ChatMessage {
   return {
     id: 'welcome-1',
     sender: 'bot',
-    text: 'Welcome Captain. I am your RAG-powered Maritime Voice Intelligence Assistant. Ask any operational query or emergency procedure command below.',
+    text: 'Welcome Captain. I am a RAG-powered voice assistant grounded in Dagmawi Teferi’s professional knowledge base. Ask about his skills, experience, or projects.',
     timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
   }
 }
@@ -91,7 +91,7 @@ export function ConsolePage() {
       if (dynamicPresets && dynamicPresets.length > 0) {
         setPresets(dynamicPresets)
         const topTopics = dynamicPresets.slice(0, 3).join(', ')
-        const dynamicWelcome = `Welcome Captain. I am your RAG-powered Voice Intelligence Assistant grounded in: ${topTopics}. Ask any operational query or emergency procedure command below.`
+        const dynamicWelcome = `Welcome Captain. I am your RAG-powered Voice Intelligence Assistant grounded in Dagmawi Teferi's profile. Try asking about: ${topTopics}.`
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === 'welcome-1' ? { ...msg, text: dynamicWelcome } : msg
@@ -478,7 +478,7 @@ export function ConsolePage() {
           <button
             type="button"
             onClick={() =>
-              setInputText(presets.length > 0 ? presets[0] : 'What are the emergency engine shutdown procedures for Vessel Alpha?')
+              setInputText(presets.length > 0 ? presets[0] : 'Who is Dagmawi Teferi and what does he do?')
             }
             className="p-2 text-text-muted hover:text-amber transition-colors rounded hover:bg-base-700"
             title="Sample voice command"

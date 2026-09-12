@@ -5,6 +5,8 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Header, status
 from pydantic import BaseModel
 
+from application.knowledge.seed_documents import SAMPLE_DOCUMENTS as INITIAL_KNOWLEDGE_DOCS
+
 # Import `get_container` lazily inside handlers to avoid import-time circular imports
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -400,30 +402,6 @@ async def reject_submission(
 
 class UpdateSubmissionRequest(BaseModel):
     raw_content: str
-
-
-INITIAL_KNOWLEDGE_DOCS = [
-    {
-        "title": "Emergency Engine Shutdown Procedures",
-        "content": "Emergency Engine Shutdown Procedures: 1. Notify bridge immediately. 2. Press Emergency Stop button on MECP. 3. Close fuel supply valve counter-clockwise. 4. Activate emergency ventilation. 5. Engage turning gear for cooldown. 6. Log shutdown in Engine Log Book.",
-    },
-    {
-        "title": "Fire Safety Protocol",
-        "content": "Fire Safety Protocol: 1. Sound general alarm (7 short + 1 long). 2. Report location to bridge. 3. Activate fixed fire suppression (CO2/foam). 4. Close ventilation dampers. 5. Perform boundary cooling. 6. Muster crew and conduct headcount.",
-    },
-    {
-        "title": "Man Overboard (MOB) Procedures",
-        "content": "Man Overboard Recovery: 1. Shout MAN OVERBOARD. 2. Throw lifebuoy with light/smoke. 3. Press MOB button on GPS. 4. Sound 3 prolonged blasts. 5. Execute Williamson Turn. 6. Launch rescue boat and approach downwind.",
-    },
-    {
-        "title": "Fuel Bunkering Operations",
-        "content": "Fuel Bunkering Checklist: 1. Complete safety checklist with supplier. 2. Close scuppers and drains. 3. Deploy oil spill containment. 4. Max fill 95% for thermal expansion. 5. Maintain VHF Ch 69 communication. 6. Sign Bunker Delivery Note (BDN).",
-    },
-    {
-        "title": "Vessel Pre-Departure Checklist",
-        "content": "Pre-Departure Checklist: 1. Crew muster check. 2. Navigation gear (GPS, Radar, ECDIS, AIS) tested. 3. Steering gear full port to starboard tested. 4. Main engine tested ahead/astern. 5. Watertight doors closed. 6. Passage plan approved.",
-    },
-]
 
 
 async def _ensure_initial_knowledge_seeded(container):

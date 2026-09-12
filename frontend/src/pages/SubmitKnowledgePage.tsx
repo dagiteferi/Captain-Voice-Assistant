@@ -281,7 +281,7 @@ export function SubmitKnowledgePage() {
                 className="w-full bg-base-900 border border-border rounded-sm p-3 text-sm text-text-primary focus:border-amber focus:ring-1 focus:ring-amber outline-none font-mono"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://example.com/maritime-safety-protocol"
+                placeholder="Paste or type a fact about Dagmawi Teferi (skills, a role, or a project)"
                 disabled={isSubmitting}
               />
             </div>
