@@ -5,6 +5,7 @@ import { TracePage } from '@/pages/TracePage'
 import { SubmitKnowledgePage } from '@/pages/SubmitKnowledgePage'
 import { ReviewQueuePage } from '@/pages/ReviewQueuePage'
 import { ManageKnowledgePage } from '@/pages/ManageKnowledgePage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/submit-knowledge" element={<SubmitKnowledgePage />} />
         <Route path="/review-queue" element={<ReviewQueuePage />} />
         <Route path="/manage-knowledge" element={<ManageKnowledgePage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </AppShell>
   )

@@ -7,6 +7,7 @@ import {
   Radio,
   Circle,
   Database,
+  Settings,
 } from 'lucide-react'
 import { RoleSwitcher, RoleBadge } from '@/shared/ui/RoleBadge'
 import { useRole } from '@/shared/lib/roles'
@@ -32,6 +33,7 @@ const NAV_ITEMS: NavItem[] = [
     requiresCaptain: true,
     tooltip: 'Captain access only',
   },
+  { to: '/settings', label: 'Settings', icon: Settings },
 ]
 
 

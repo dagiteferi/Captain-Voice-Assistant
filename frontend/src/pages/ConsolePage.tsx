@@ -10,10 +10,13 @@ import {
   Bot,
   User,
   Trash2,
+  Play,
+  Square,
 } from 'lucide-react'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useRole } from '@/shared/lib/roles'
-import { AudioPlayer } from '@/features/audio-player/ui/AudioPlayer'
+import { useSettings } from '@/shared/lib/useSettings'
+import { useAudioBlob } from '@/shared/api/useAudioBlob'
 import { submitCommand, getCommand } from '@/entities/command/api/commandApi'
 import type { CommandResponse } from '@/entities/command/model/types'
 
@@ -29,10 +32,17 @@ interface ChatMessage {
 
 export function ConsolePage() {
   const { role } = useRole()
+  const { settings } = useSettings()
+  
   const [inputText, setInputText] = useState('')
   const [targetLanguage, setTargetLanguage] = useState(
-    import.meta.env.VITE_DEFAULT_LANGUAGE || 'am'
+    settings.defaultLanguage || import.meta.env.VITE_DEFAULT_LANGUAGE || 'am'
   )
+  
+  useEffect(() => {
+    setTargetLanguage(settings.defaultLanguage)
+  }, [settings.defaultLanguage])
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentStage, setCurrentStage] = useState<number>(-1)
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -263,7 +273,9 @@ export function ConsolePage() {
               {/* Message Content Bubble */}
               <div className="space-y-2">
                 <div
-                  className={`p-3.5 rounded-lg text-sm leading-relaxed ${
+                  className={`p-3.5 rounded-lg leading-relaxed ${
+                    settings.textSize === 'xl' ? 'text-lg' : settings.textSize === 'large' ? 'text-base' : 'text-sm'
+                  } ${
                     msg.sender === 'user'
                       ? 'bg-amber text-base-900 font-medium rounded-tr-none'
                       : 'bg-base-800 border border-border text-text-primary rounded-tl-none'
@@ -295,54 +307,10 @@ export function ConsolePage() {
                   </div>
                 </div>
 
-                {/* Extended Details for Bot Message */}
-                {msg.command && (
-                  <div className="space-y-3 p-3 bg-base-800/80 border border-border rounded-lg text-xs">
-                    {/* Citations */}
-                    {msg.command.citations && msg.command.citations.length > 0 && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-1 text-[11px] font-semibold text-amber">
-                          <BookOpen className="h-3.5 w-3.5" />
-                          <span>Knowledge Base Citations</span>
-                        </div>
-                        <div className="grid gap-1.5">
-                          {msg.command.citations.map((c) => (
-                            <div
-                              key={c.chunk_id}
-                              className="p-2 bg-base-900 border border-border-subtle rounded flex items-center justify-between text-text-secondary text-[11px]"
-                            >
-                              <span className="truncate">{c.document_title || `Chunk ${c.chunk_id.slice(0, 8)}`}</span>
-                              <span className="mono text-[10px] text-amber">RAG Match</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Translation */}
-                    {msg.command.translated_text && (
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-1 text-[11px] font-semibold text-sky">
-                          <Globe className="h-3.5 w-3.5" />
-                          <span>Translated Output ({msg.command.target_language.toUpperCase()})</span>
-                        </div>
-                        <div className="p-2.5 bg-sky/10 border border-sky/20 rounded text-sky leading-relaxed font-sans">
-                          {msg.command.translated_text}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Synthesized Voice Player */}
-                    {msg.command.audio_url && (
-                      <div className="pt-1">
-                        <AudioPlayer
-                          audioUrl={msg.command.audio_url}
-                          title={`Voice Response (${msg.command.target_language.toUpperCase()})`}
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
+                  {/* Synthesized Voice Player */}
+                  {msg.command?.audio_url && (
+                    <BotMessageAudio audioUrl={msg.command.audio_url} autoPlay={settings.autoPlayVoice} />
+                  )}
               </div>
             </div>
           ))}
@@ -461,6 +429,55 @@ export function PageShell({ icon: Icon, title, label, badge, children }: PageShe
         {badge}
       </div>
       {children}
+    </div>
+  )
+}
+
+function BotMessageAudio({ audioUrl, autoPlay }: { audioUrl: string, autoPlay: boolean }) {
+  const { blobUrl } = useAudioBlob(audioUrl)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+  const [isPlaying, setIsPlaying] = useState(false)
+
+  useEffect(() => {
+    if (blobUrl && audioRef.current && autoPlay) {
+      audioRef.current.play().then(() => {
+        setIsPlaying(true)
+      }).catch((e) => console.error("Auto-play failed:", e))
+    }
+  }, [blobUrl, autoPlay])
+
+  if (!blobUrl) return null
+
+  const togglePlay = () => {
+    if (!audioRef.current) return
+    if (isPlaying) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      setIsPlaying(false)
+    } else {
+      audioRef.current.play()
+      setIsPlaying(true)
+    }
+  }
+
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <audio
+        ref={audioRef}
+        src={blobUrl}
+        onEnded={() => setIsPlaying(false)}
+        onPause={() => setIsPlaying(false)}
+        onPlay={() => setIsPlaying(true)}
+        className="hidden"
+      />
+      <button
+        onClick={togglePlay}
+        className="p-1.5 rounded-full bg-amber text-base-900 hover:bg-amber-dim hover:text-amber transition-colors flex-shrink-0"
+        title={isPlaying ? "Stop" : "Play"}
+      >
+        {isPlaying ? <Square className="h-3 w-3 fill-current" /> : <Play className="h-3 w-3 fill-current ml-0.5" />}
+      </button>
+      <span className="text-[10px] mono text-amber">Voice Output Generated</span>
     </div>
   )
 }
