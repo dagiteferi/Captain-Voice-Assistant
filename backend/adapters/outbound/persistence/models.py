@@ -27,6 +27,7 @@ class CommandModel(Base):
     conversation_id: Mapped[UUID] = mapped_column(ForeignKey("conversations.id"))
     input_text: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(32))
+    voice_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     conversation: Mapped[ConversationModel] = relationship(back_populates="commands")

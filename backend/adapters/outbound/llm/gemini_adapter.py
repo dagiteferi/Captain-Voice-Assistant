@@ -29,7 +29,7 @@ class GeminiLLMAdapter:
             )
         self._api_key = api_key
         self._model = model
-        self._client = httpx.AsyncClient(timeout=60.0)
+        self._client = httpx.AsyncClient(timeout=25.0)
 
     async def generate(
         self,
@@ -49,8 +49,8 @@ class GeminiLLMAdapter:
         payload = {
             "contents": contents,
             "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 1024,
+                "temperature": 0.1,
+                "maxOutputTokens": 400,
             },
         }
 

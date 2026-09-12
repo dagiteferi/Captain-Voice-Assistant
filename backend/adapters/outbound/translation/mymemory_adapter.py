@@ -25,7 +25,7 @@ class MyMemoryTranslateAdapter:
 
     def __init__(self, email: str = "") -> None:
         self._email = email
-        self._client = httpx.AsyncClient(timeout=15.0)
+        self._client = httpx.AsyncClient(timeout=8.0)
 
     async def initialize(self) -> None:
         """No startup work needed — API is stateless."""

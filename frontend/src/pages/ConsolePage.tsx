@@ -15,10 +15,20 @@ import {
 } from 'lucide-react'
 import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useRole } from '@/shared/lib/roles'
-import { useSettings } from '@/shared/lib/useSettings'
+import { useSettings, voiceForLanguage } from '@/shared/lib/useSettings'
 import { useAudioBlob } from '@/shared/api/useAudioBlob'
 import { submitCommand, getCommand, retranslateCommand } from '@/entities/command/api/commandApi'
 import type { CommandResponse } from '@/entities/command/model/types'
+
+function withCacheBust(url: string | null | undefined): string | null {
+  if (!url) return null
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}t=${Date.now()}`
+}
+
+function displayText(command: CommandResponse): string {
+  return command.translated_text || command.answer_text || 'No answer returned by pipeline.'
+}
 
 interface ChatMessage {
   id: string
@@ -29,6 +39,18 @@ interface ChatMessage {
   isPending?: boolean
   error?: string
 }
+
+function welcomeMessage(): ChatMessage {
+  return {
+    id: 'welcome-1',
+    sender: 'bot',
+    text: 'Welcome Captain. I am your RAG-powered Maritime Voice Intelligence Assistant. Ask any operational query or emergency procedure command below.',
+    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+  }
+}
+
+let persistedMessages: ChatMessage[] | null = null
+let appliedVoices = { am: '', en: '' }
 
 export function ConsolePage() {
   const { role } = useRole()
@@ -45,14 +67,8 @@ export function ConsolePage() {
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [currentStage, setCurrentStage] = useState<number>(-1)
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: 'welcome-1',
-      sender: 'bot',
-      text: 'Welcome Captain. I am your RAG-powered Maritime Voice Intelligence Assistant. Ask any operational query or emergency procedure command below.',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    },
-  ])
+  const [busyMsgId, setBusyMsgId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>(() => persistedMessages ?? [welcomeMessage()])
 
   const chatEndRef = useRef<HTMLDivElement | null>(null)
 
@@ -64,24 +80,9 @@ export function ConsolePage() {
     scrollToBottom()
   }, [messages, isSubmitting])
 
-  if (role === 'guest') {
-    return (
-      <PageShell
-        icon={Terminal}
-        title="Command Console"
-        label="VOICE COMMAND INTERFACE"
-        badge={<StatusBadge status="failed" size="sm" />}
-      >
-        <div className="panel p-8 text-center space-y-3">
-          <StatusBadge status="failed" size="sm" />
-          <h2 className="text-base font-semibold text-text-primary">Guest Role Access Restricted</h2>
-          <p className="text-text-secondary text-sm max-w-md mx-auto">
-            Guests cannot submit voice/text commands or view conversation history. Use the top bar switcher to adopt the <strong className="text-sky">Crew</strong> or <strong className="text-amber">Captain</strong> role.
-          </p>
-        </div>
-      </PageShell>
-    )
-  }
+  useEffect(() => {
+    persistedMessages = messages
+  }, [messages])
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend || inputText).trim()
@@ -115,7 +116,7 @@ export function ConsolePage() {
         {
           input_text: text,
           target_language: targetLanguage,
-          voice_id: settings.voiceId ?? null,
+          voice_id: voiceForLanguage(settings, targetLanguage),
         },
         role,
       )
@@ -123,14 +124,14 @@ export function ConsolePage() {
       let attempts = 0
       const pollTimer = setInterval(async () => {
         attempts++
-        if (attempts <= 3) setCurrentStage(0) // Retrieving
-        else if (attempts <= 8) setCurrentStage(1) // Grounding
-        else if (attempts <= 15) setCurrentStage(2) // Translating
-        else setCurrentStage(3) // Synthesizing
+        if (attempts <= 4) setCurrentStage(0)
+        else if (attempts <= 10) setCurrentStage(1)
+        else if (attempts <= 16) setCurrentStage(2)
+        else setCurrentStage(3)
 
         try {
           const fullCmd = await getCommand(res.command_id, role)
-          if (fullCmd.status !== 'pending' || attempts >= 60) {
+          if (fullCmd.status !== 'pending' || attempts >= 80) {
             clearInterval(pollTimer)
             setIsSubmitting(false)
             setCurrentStage(-1)
@@ -140,8 +141,11 @@ export function ConsolePage() {
                 msg.id === botMsgId
                   ? {
                       ...msg,
-                      text: fullCmd.answer_text || 'No answer returned by pipeline.',
-                      command: fullCmd,
+                      text: displayText(fullCmd),
+                      command: {
+                        ...fullCmd,
+                        audio_url: withCacheBust(fullCmd.audio_url),
+                      },
                       isPending: false,
                     }
                   : msg,
@@ -149,7 +153,7 @@ export function ConsolePage() {
             )
           }
         } catch (err: unknown) {
-          if (attempts >= 60) {
+          if (attempts >= 80) {
             clearInterval(pollTimer)
             setIsSubmitting(false)
             setCurrentStage(-1)
@@ -168,7 +172,7 @@ export function ConsolePage() {
             )
           }
         }
-      }, 2000)
+      }, 400)
     } catch (err: unknown) {
       setIsSubmitting(false)
       setCurrentStage(-1)
@@ -189,27 +193,79 @@ export function ConsolePage() {
   }
 
   const handleRetranslate = async (commandId: string, newLang: string, botMsgId: string) => {
+    setBusyMsgId(botMsgId)
     try {
-      const res = await retranslateCommand(commandId, newLang, role, settings.voiceId)
+      const res = await retranslateCommand(
+        commandId,
+        newLang,
+        role,
+        voiceForLanguage(settings, newLang),
+      )
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === botMsgId && msg.command
             ? {
                 ...msg,
+                error: undefined,
                 command: {
                   ...msg.command,
                   translated_text: res.translated_text,
-                  audio_url: res.audio_url,
+                  audio_url: withCacheBust(res.audio_url),
                   target_language: res.target_language,
                 },
                 text: res.translated_text || msg.text,
               }
-            : msg
-        )
+            : msg,
+        ),
       )
     } catch (e) {
-      console.error("Retranslation failed:", e)
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMsgId
+            ? {
+                ...msg,
+                error: e instanceof Error ? e.message : 'Translation failed. Try again.',
+              }
+            : msg,
+        ),
+      )
+    } finally {
+      setBusyMsgId(null)
     }
+  }
+
+  useEffect(() => {
+    const changed =
+      appliedVoices.am !== settings.voiceIdAm || appliedVoices.en !== settings.voiceIdEn
+    appliedVoices = { am: settings.voiceIdAm, en: settings.voiceIdEn }
+    if (!changed) return
+    const bots = messages.filter((msg) => msg.command && !msg.isPending)
+    bots.forEach((msg) => {
+      if (msg.command) {
+        void handleRetranslate(msg.command.command_id, msg.command.target_language, msg.id)
+      }
+    })
+    // Re-speak existing replies when a settings voice changes (including after returning from Settings).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings.voiceIdAm, settings.voiceIdEn])
+
+  if (role === 'guest') {
+    return (
+      <PageShell
+        icon={Terminal}
+        title="Command Console"
+        label="VOICE COMMAND INTERFACE"
+        badge={<StatusBadge status="failed" size="sm" />}
+      >
+        <div className="panel p-8 text-center space-y-3">
+          <StatusBadge status="failed" size="sm" />
+          <h2 className="text-base font-semibold text-text-primary">Guest Role Access Restricted</h2>
+          <p className="text-text-secondary text-sm max-w-md mx-auto">
+            Guests cannot submit voice/text commands or view conversation history. Use the top bar switcher to adopt the <strong className="text-sky">Crew</strong> or <strong className="text-amber">Captain</strong> role.
+          </p>
+        </div>
+      </PageShell>
+    )
   }
 
   const stages = ['Retrieving', 'Grounding', 'Translating', 'Synthesizing']
@@ -339,16 +395,23 @@ export function ConsolePage() {
                       <Globe className="h-3 w-3 text-sky" />
                       <select
                         value={msg.command.target_language}
+                        disabled={busyMsgId === msg.id}
                         onChange={(e) => handleRetranslate(msg.command!.command_id, e.target.value, msg.id)}
-                        className="bg-transparent text-[11px] font-medium text-text-secondary outline-none cursor-pointer"
+                        className="bg-transparent text-[11px] font-medium text-text-secondary outline-none cursor-pointer disabled:opacity-50"
                       >
                         <option value="am">Amharic (አማርኛ)</option>
                         <option value="en">English</option>
                       </select>
                     </div>
-                    
-                    {msg.command.audio_url && (
-                      <BotMessageAudio audioUrl={msg.command.audio_url} autoPlay={settings.autoPlayVoice} />
+
+                    {busyMsgId === msg.id ? (
+                      <span className="text-[10px] mono text-sky flex items-center gap-1">
+                        <Loader2 className="h-3 w-3 animate-spin" /> Updating…
+                      </span>
+                    ) : (
+                      msg.command.audio_url && (
+                        <BotMessageAudio key={msg.command.audio_url} audioUrl={msg.command.audio_url} autoPlay={settings.autoPlayVoice} />
+                      )
                     )}
                   </div>
                 )}

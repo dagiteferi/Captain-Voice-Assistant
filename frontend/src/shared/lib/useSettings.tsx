@@ -4,14 +4,20 @@ export interface Settings {
   autoPlayVoice: boolean
   textSize: 'normal' | 'large' | 'xl'
   defaultLanguage: 'am' | 'en'
-  voiceId: string | null
+  voiceIdAm: string
+  voiceIdEn: string
 }
 
 const DEFAULT_SETTINGS: Settings = {
   autoPlayVoice: true,
   textSize: 'normal',
   defaultLanguage: 'am',
-  voiceId: null,
+  voiceIdAm: 'am-ET-MekdesNeural',
+  voiceIdEn: 'en-US-ChristopherNeural',
+}
+
+export function voiceForLanguage(settings: Settings, language: string): string {
+  return language === 'am' ? settings.voiceIdAm : settings.voiceIdEn
 }
 
 interface SettingsContextType {
@@ -22,24 +28,32 @@ interface SettingsContextType {
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined)
 
-export function SettingsProvider({ children }: { children: ReactNode }) {
-  const [settings, setSettings] = useState<Settings>(() => {
-    try {
-      const stored = localStorage.getItem('captain-settings')
-      if (stored) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) }
-      }
-    } catch (e) {
-      console.error('Failed to load settings from localStorage', e)
+function loadSettings(): Settings {
+  try {
+    const stored = localStorage.getItem('captain-settings')
+    if (!stored) return DEFAULT_SETTINGS
+    const parsed = JSON.parse(stored) as Partial<Settings> & { voiceId?: string | null }
+    const next = { ...DEFAULT_SETTINGS, ...parsed }
+    if (!parsed.voiceIdAm && parsed.voiceId?.startsWith('am-')) {
+      next.voiceIdAm = parsed.voiceId
     }
+    if (!parsed.voiceIdEn && parsed.voiceId && !parsed.voiceId.startsWith('am-')) {
+      next.voiceIdEn = parsed.voiceId
+    }
+    return next
+  } catch {
     return DEFAULT_SETTINGS
-  })
+  }
+}
+
+export function SettingsProvider({ children }: { children: ReactNode }) {
+  const [settings, setSettings] = useState<Settings>(loadSettings)
 
   useEffect(() => {
     try {
       localStorage.setItem('captain-settings', JSON.stringify(settings))
-    } catch (e) {
-      console.error('Failed to save settings to localStorage', e)
+    } catch {
+      /* ignore quota */
     }
   }, [settings])
 

@@ -32,17 +32,12 @@ class EdgeTTSAdapter:
                 "TTS synthesis requested with empty text — nothing to synthesize."
             )
 
-        # Select voice based on script detection or voice profile
         voice = self.default_voice
-        if any("\u1200" <= char <= "\u137f" for char in text):
-            # Amharic Unicode range → use Amharic neural voice
-            voice = "am-ET-MekdesNeural"
-            logger.info("Detected Amharic script — using voice: %s", voice)
-        elif voice_profile and hasattr(voice_profile, "voice_id") and voice_profile.voice_id:
+        if voice_profile and getattr(voice_profile, "voice_id", None):
             voice = voice_profile.voice_id
-            logger.info("Using voice profile voice_id: %s", voice)
-        else:
-            logger.info("Using default voice: %s", voice)
+        elif any("\u1200" <= char <= "\u137f" for char in text):
+            voice = "am-ET-MekdesNeural"
+        logger.info("Using TTS voice: %s", voice)
 
         try:
             import edge_tts

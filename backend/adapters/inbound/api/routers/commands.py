@@ -136,6 +136,7 @@ async def get_command(
         translation = await repository.get_translation_for_answer(command.grounded_answer.id)
         if translation:
             translated_text = translation.translated_text
+            target_language = translation.target_language.code
             audio = await repository.get_audio_for_translation(translation.id)
             if audio:
                 audio_url = f"/api/v1/audio/{audio.id}"
@@ -243,66 +244,70 @@ async def retranslate_command(
     if x_user_role not in ("captain", "crew"):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    from main import get_container
-    from domain.voice.entities import Translation, AudioResponse, CAPTAIN_PRESET
+    from pathlib import Path
+    from uuid import uuid4
+
     from domain.conversation.value_objects import Language
-    import uuid
-    import os
-    
+    from domain.voice.entities import AudioResponse, Translation, VoiceProfile
+    from main import get_container
+
     container = get_container()
     command = await container.conversation_repository.get_command(command_id)
     if command is None or not command.grounded_answer:
         raise HTTPException(status_code=404, detail="Command or answer not found")
-    
-    answer_text = command.grounded_answer.answer_text
+
     lang = Language(request.target_language)
-    
-    # 1. Translate
-    translated_text = await container.translator.translate(
-        text=answer_text,
-        target_language=lang
-    )
-    
+    try:
+        translated_text = await container.translator.translate(
+            command.grounded_answer.answer_text,
+            lang,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Translation failed: {exc}") from exc
+
     translation = Translation(
         answer_id=command.grounded_answer.id,
         target_language=lang,
         translated_text=translated_text,
     )
     await container.conversation_repository.save_translation(translation)
-    
-    # 2. TTS - use requested voice_id or fallback to CAPTAIN_PRESET
-    from domain.voice.entities import VoiceProfile as VP
-    if request.voice_id:
-        tts_voice = VP(
-            name="user-selected",
+
+    conversation = await container.conversation_repository.get_conversation(command.conversation_id)
+    if conversation is not None:
+        conversation.target_language = lang
+        await container.conversation_repository.save_conversation(conversation)
+
+    audio_url = None
+    try:
+        tts_voice = VoiceProfile(
+            name="user-selected" if request.voice_id else "default",
             language=lang,
             voice_id=request.voice_id,
         )
-    else:
-        tts_voice = CAPTAIN_PRESET
-    audio_bytes = await container.tts.synthesize(
-        text=translated_text,
-        voice_profile=tts_voice,
-    )
-    
-    audio_id = uuid.uuid4()
-    audio_dir = "/tmp/captain_audio"
-    os.makedirs(audio_dir, exist_ok=True)
-    audio_path = f"{audio_dir}/{audio_id}.wav"
-    with open(audio_path, "wb") as f:
-        f.write(audio_bytes)
-        
-    audio = AudioResponse.create(
-        translation_id=translation.id,
-        voice_profile=tts_voice,
-        audio_path=audio_path,
-    )
-    audio.id = audio_id
-    await container.conversation_repository.save_audio_response(audio)
-    
+        audio_bytes = await container.tts.synthesize(translated_text, tts_voice)
+        if audio_bytes:
+            existing = await container.conversation_repository.get_audio_for_translation(translation.id)
+            audio_id = existing.id if existing else uuid4()
+            audio_dir = Path(container._audio_dir)
+            audio_dir.mkdir(parents=True, exist_ok=True)
+            audio_path = audio_dir / f"{audio_id}.mp3"
+            audio_path.write_bytes(audio_bytes)
+            audio = AudioResponse.create(
+                translation_id=translation.id,
+                voice_profile=tts_voice,
+                audio_path=str(audio_path),
+                duration_ms=max(int(len(audio_bytes) / 16000 * 1000), 1),
+            )
+            audio.id = audio_id
+            await container.conversation_repository.save_audio_response(audio)
+            audio_url = f"/api/v1/audio/{audio.id}"
+    except Exception as exc:
+        logger = __import__("logging").getLogger(__name__)
+        logger.warning("Retranslate TTS failed: %s", exc)
+
     return {
         "status": "success",
         "translated_text": translated_text,
-        "audio_url": f"/api/v1/audio/{audio.id}",
+        "audio_url": audio_url,
         "target_language": request.target_language,
     }

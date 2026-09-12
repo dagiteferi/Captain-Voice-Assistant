@@ -11,6 +11,7 @@ from adapters.outbound.orchestration.orchestrator_agent import FlatLangGraphOrch
 from adapters.outbound.persistence.migrations import create_session_factory, create_sqlite_engine, run_migrations
 from adapters.outbound.persistence.sqlite_repository import SQLiteConversationRepository
 from adapters.outbound.translation.mymemory_adapter import MyMemoryTranslateAdapter
+from adapters.outbound.translation.resilient_adapter import ResilientTranslator
 from adapters.outbound.tts.edge_tts_adapter import EdgeTTSAdapter
 from adapters.outbound.tts.google_tts_adapter import GoogleTTSAdapter
 from adapters.outbound.vector_store.chroma_adapter import ChromaVectorStoreAdapter
@@ -68,7 +69,10 @@ class DIContainer:
         if translator is not None:
             self.translator = translator
         else:
-            self.translator = MyMemoryTranslateAdapter(email=settings.mymemory_email)
+            self.translator = ResilientTranslator(
+                MyMemoryTranslateAdapter(email=settings.mymemory_email),
+                llm=self.llm,
+            )
 
         # TTS (Google Cloud TTS API or override or fallback)
         if tts is not None:

@@ -64,7 +64,10 @@ function VoicePreviewButton({ voiceId, lang }: { voiceId: string; lang: 'am' | '
 
   return (
     <button
-      onClick={handlePreview}
+      onClick={(e) => {
+        e.stopPropagation()
+        void handlePreview()
+      }}
       title={state === 'playing' ? 'Stop preview' : 'Preview this voice'}
       className={`flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-medium border transition-all ${
         state === 'playing'
@@ -94,7 +97,8 @@ export function SettingsPage() {
   const amharicVoices = VOICE_OPTIONS.filter((v) => v.lang === 'am')
   const englishVoices = VOICE_OPTIONS.filter((v) => v.lang === 'en')
 
-  const selectedVoice = VOICE_OPTIONS.find((v) => v.value === settings.voiceId)
+  const selectedAm = VOICE_OPTIONS.find((v) => v.value === settings.voiceIdAm)
+  const selectedEn = VOICE_OPTIONS.find((v) => v.value === settings.voiceIdEn)
 
   return (
     <PageShell icon={Settings} title="Settings" label="PREFERENCES & CONFIGURATION">
@@ -132,11 +136,11 @@ export function SettingsPage() {
               </label>
               <div className="space-y-2">
                 {amharicVoices.map((voice) => {
-                  const isSelected = settings.voiceId === voice.value
+                  const isSelected = settings.voiceIdAm === voice.value
                   return (
                     <div
                       key={voice.value}
-                      onClick={() => updateSetting('voiceId', isSelected ? null : voice.value)}
+                      onClick={() => updateSetting('voiceIdAm', voice.value)}
                       className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
                         isSelected
                           ? 'bg-amber/10 border-amber/50 shadow-sm'
@@ -168,11 +172,11 @@ export function SettingsPage() {
               </label>
               <div className="space-y-2">
                 {englishVoices.map((voice) => {
-                  const isSelected = settings.voiceId === voice.value
+                  const isSelected = settings.voiceIdEn === voice.value
                   return (
                     <div
                       key={voice.value}
-                      onClick={() => updateSetting('voiceId', isSelected ? null : voice.value)}
+                      onClick={() => updateSetting('voiceIdEn', voice.value)}
                       className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all ${
                         isSelected
                           ? 'bg-amber/10 border-amber/50 shadow-sm'
@@ -197,21 +201,14 @@ export function SettingsPage() {
               </div>
             </div>
 
-            {/* Currently active voice summary */}
-            {selectedVoice && (
-              <div className="flex items-center gap-2 p-3 bg-amber/5 border border-amber/20 rounded-lg">
-                <CheckCircle2 className="h-4 w-4 text-amber flex-shrink-0" />
-                <p className="text-xs text-text-secondary">
-                  Active voice: <span className="font-semibold text-amber">{selectedVoice.label}</span>
-                  {' '}— will be used for all new commands and translations.
-                </p>
-              </div>
-            )}
-            {!selectedVoice && (
-              <div className="p-3 bg-base-800/60 border border-border rounded-lg">
-                <p className="text-xs text-text-muted">No voice selected — the system default voice will be used based on language.</p>
-              </div>
-            )}
+            <div className="flex items-start gap-2 p-3 bg-amber/5 border border-amber/20 rounded-lg">
+              <CheckCircle2 className="h-4 w-4 text-amber flex-shrink-0 mt-0.5" />
+              <p className="text-xs text-text-secondary">
+                Chat uses <span className="font-semibold text-amber">{selectedAm?.label ?? settings.voiceIdAm}</span> for Amharic
+                and <span className="font-semibold text-amber">{selectedEn?.label ?? settings.voiceIdEn}</span> for English.
+                Changing a voice re-speaks existing replies in that language.
+              </p>
+            </div>
           </div>
         </div>
 

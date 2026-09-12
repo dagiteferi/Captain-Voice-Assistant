@@ -50,18 +50,15 @@ class GoogleTTSAdapter:
         if not text or not text.strip():
             raise RuntimeError("TTS synthesis requested with empty text.")
 
-        # Detect Amharic by Unicode range
-        has_amharic = any("\u1200" <= char <= "\u137f" for char in text)
-
-        if has_amharic:
-            voice_name = self._voice_am
-            language_code = "am-ET"
-        elif voice_profile and hasattr(voice_profile, "voice_id") and voice_profile.voice_id:
+        if voice_profile and getattr(voice_profile, "voice_id", None):
             voice_name = voice_profile.voice_id
-            language_code = voice_name.split("-")[0] + "-" + voice_name.split("-")[1] if "-" in voice_name else "en-US"
+        elif any("\u1200" <= char <= "\u137f" for char in text):
+            voice_name = self._voice_am
         else:
             voice_name = self._voice_en
-            language_code = "en-US"
+
+        parts = voice_name.split("-")
+        language_code = f"{parts[0]}-{parts[1]}" if len(parts) >= 2 else "en-US"
 
         logger.info(
             "[tts] Google Cloud TTS: voice=%s, lang=%s, text len=%d chars...",
