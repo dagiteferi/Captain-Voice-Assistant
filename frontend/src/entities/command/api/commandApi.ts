@@ -34,3 +34,16 @@ export async function getCommandTrace(
     role,
   })
 }
+
+export async function retranslateCommand(
+  commandId: string,
+  targetLanguage: string,
+  role: string,
+  voiceId?: string | null,
+): Promise<{ status: string, translated_text: string, audio_url: string, target_language: string }> {
+  return fetchApi(`/api/v1/commands/${commandId}/retranslate`, {
+    method: 'POST',
+    body: JSON.stringify({ target_language: targetLanguage, voice_id: voiceId ?? null }),
+    role,
+  })
+}

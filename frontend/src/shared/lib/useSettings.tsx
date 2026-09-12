@@ -3,13 +3,15 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 export interface Settings {
   autoPlayVoice: boolean
   textSize: 'normal' | 'large' | 'xl'
-  defaultLanguage: 'am' | 'en' | 'fr'
+  defaultLanguage: 'am' | 'en'
+  voiceId: string | null
 }
 
 const DEFAULT_SETTINGS: Settings = {
   autoPlayVoice: true,
   textSize: 'normal',
   defaultLanguage: 'am',
+  voiceId: null,
 }
 
 interface SettingsContextType {

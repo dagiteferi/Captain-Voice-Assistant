@@ -33,6 +33,7 @@ class Command:
     conversation_id: UUID
     input_text: str
     id: UUID = field(default_factory=uuid4)
+    voice_id: str | None = None
     status: CommandStatus = CommandStatus.PENDING
     grounded_answer: GroundedAnswer | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -70,8 +71,8 @@ class Conversation:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     commands: list[Command] = field(default_factory=list)
 
-    def submit_command(self, input_text: str) -> Command:
-        command = Command(conversation_id=self.id, input_text=input_text)
+    def submit_command(self, input_text: str, voice_id: str | None = None) -> Command:
+        command = Command(conversation_id=self.id, input_text=input_text, voice_id=voice_id)
         self.commands.append(command)
         return command
 

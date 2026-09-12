@@ -40,6 +40,7 @@ export interface SubmitCommandRequest {
   conversation_id?: string | null
   input_text: string
   target_language: string
+  voice_id?: string | null
 }
 
 export interface SubmitCommandResponse {

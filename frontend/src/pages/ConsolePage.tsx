@@ -17,7 +17,7 @@ import { StatusBadge } from '@/shared/ui/StatusBadge'
 import { useRole } from '@/shared/lib/roles'
 import { useSettings } from '@/shared/lib/useSettings'
 import { useAudioBlob } from '@/shared/api/useAudioBlob'
-import { submitCommand, getCommand } from '@/entities/command/api/commandApi'
+import { submitCommand, getCommand, retranslateCommand } from '@/entities/command/api/commandApi'
 import type { CommandResponse } from '@/entities/command/model/types'
 
 interface ChatMessage {
@@ -115,6 +115,7 @@ export function ConsolePage() {
         {
           input_text: text,
           target_language: targetLanguage,
+          voice_id: settings.voiceId ?? null,
         },
         role,
       )
@@ -184,6 +185,30 @@ export function ConsolePage() {
             : msg,
         ),
       )
+    }
+  }
+
+  const handleRetranslate = async (commandId: string, newLang: string, botMsgId: string) => {
+    try {
+      const res = await retranslateCommand(commandId, newLang, role, settings.voiceId)
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === botMsgId && msg.command
+            ? {
+                ...msg,
+                command: {
+                  ...msg.command,
+                  translated_text: res.translated_text,
+                  audio_url: res.audio_url,
+                  target_language: res.target_language,
+                },
+                text: res.translated_text || msg.text,
+              }
+            : msg
+        )
+      )
+    } catch (e) {
+      console.error("Retranslation failed:", e)
     }
   }
 
@@ -307,10 +332,26 @@ export function ConsolePage() {
                   </div>
                 </div>
 
-                  {/* Synthesized Voice Player */}
-                  {msg.command?.audio_url && (
-                    <BotMessageAudio audioUrl={msg.command.audio_url} autoPlay={settings.autoPlayVoice} />
-                  )}
+                {/* Translate & Audio Controls */}
+                {msg.command && (
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5 bg-base-800/80 px-2 py-1.5 rounded border border-border">
+                      <Globe className="h-3 w-3 text-sky" />
+                      <select
+                        value={msg.command.target_language}
+                        onChange={(e) => handleRetranslate(msg.command!.command_id, e.target.value, msg.id)}
+                        className="bg-transparent text-[11px] font-medium text-text-secondary outline-none cursor-pointer"
+                      >
+                        <option value="am">Amharic (አማርኛ)</option>
+                        <option value="en">English</option>
+                      </select>
+                    </div>
+                    
+                    {msg.command.audio_url && (
+                      <BotMessageAudio audioUrl={msg.command.audio_url} autoPlay={settings.autoPlayVoice} />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -461,7 +502,7 @@ function BotMessageAudio({ audioUrl, autoPlay }: { audioUrl: string, autoPlay: b
   }
 
   return (
-    <div className="mt-2 flex items-center gap-2">
+    <div className="flex items-center gap-2">
       <audio
         ref={audioRef}
         src={blobUrl}
@@ -477,7 +518,7 @@ function BotMessageAudio({ audioUrl, autoPlay }: { audioUrl: string, autoPlay: b
       >
         {isPlaying ? <Square className="h-3 w-3 fill-current" /> : <Play className="h-3 w-3 fill-current ml-0.5" />}
       </button>
-      <span className="text-[10px] mono text-amber">Voice Output Generated</span>
+      <span className="text-[10px] mono text-amber">Voice Output</span>
     </div>
   )
 }

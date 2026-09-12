@@ -13,6 +13,7 @@ class SubmitCommandRequest(BaseModel):
     conversation_id: UUID | None = None
     input_text: str
     target_language: str
+    voice_id: str | None = None
 
 
 class CommandResponse(BaseModel):
@@ -69,6 +70,7 @@ async def submit_command(
     command = Command(
         conversation_id=conversation_id,
         input_text=request.input_text,
+        voice_id=request.voice_id,
     )
     await repository.save_command(command)
     background_tasks.add_task(_run_pipeline, command.id)
@@ -226,3 +228,81 @@ async def stream_command_trace(
     from adapters.inbound.api.sse import stream_events
 
     return await stream_events(command_id, since_event_id=since_event_id)
+
+
+class RetranslateRequest(BaseModel):
+    target_language: str
+    voice_id: str | None = None
+
+@router.post("/{command_id}/retranslate")
+async def retranslate_command(
+    command_id: UUID,
+    request: RetranslateRequest,
+    x_user_role: str = Header(...),
+):
+    if x_user_role not in ("captain", "crew"):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    from main import get_container
+    from domain.voice.entities import Translation, AudioResponse, CAPTAIN_PRESET
+    from domain.conversation.value_objects import Language
+    import uuid
+    import os
+    
+    container = get_container()
+    command = await container.conversation_repository.get_command(command_id)
+    if command is None or not command.grounded_answer:
+        raise HTTPException(status_code=404, detail="Command or answer not found")
+    
+    answer_text = command.grounded_answer.answer_text
+    lang = Language(request.target_language)
+    
+    # 1. Translate
+    translated_text = await container.translator.translate(
+        text=answer_text,
+        target_language=lang
+    )
+    
+    translation = Translation(
+        answer_id=command.grounded_answer.id,
+        target_language=lang,
+        translated_text=translated_text,
+    )
+    await container.conversation_repository.save_translation(translation)
+    
+    # 2. TTS - use requested voice_id or fallback to CAPTAIN_PRESET
+    from domain.voice.entities import VoiceProfile as VP
+    if request.voice_id:
+        tts_voice = VP(
+            name="user-selected",
+            language=lang,
+            voice_id=request.voice_id,
+        )
+    else:
+        tts_voice = CAPTAIN_PRESET
+    audio_bytes = await container.tts.synthesize(
+        text=translated_text,
+        voice_profile=tts_voice,
+    )
+    
+    audio_id = uuid.uuid4()
+    audio_dir = "/tmp/captain_audio"
+    os.makedirs(audio_dir, exist_ok=True)
+    audio_path = f"{audio_dir}/{audio_id}.wav"
+    with open(audio_path, "wb") as f:
+        f.write(audio_bytes)
+        
+    audio = AudioResponse.create(
+        translation_id=translation.id,
+        voice_profile=tts_voice,
+        audio_path=audio_path,
+    )
+    audio.id = audio_id
+    await container.conversation_repository.save_audio_response(audio)
+    
+    return {
+        "status": "success",
+        "translated_text": translated_text,
+        "audio_url": f"/api/v1/audio/{audio.id}",
+        "target_language": request.target_language,
+    }

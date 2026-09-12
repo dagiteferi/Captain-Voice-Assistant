@@ -182,8 +182,7 @@ Respond with "RELEVANT" or "NOT_RELEVANT"."""
 
     async def _node_generate(self, state: PipelineState) -> dict:
         """Generate an answer grounded in retrieved chunks."""
-        prompt = f"""Answer the following query using ONLY the provided documents. 
-You MUST cite your sources by referencing the document snippets.
+        prompt = f"""Answer the following query using ONLY the provided documents. Do not include any source citations in your answer.
 Query: {state.command.input_text}
 Documents:
 {chr(10).join(f'- {c.content}' for c in state.retrieved_chunks)}
@@ -290,9 +289,19 @@ Answer:"""
         )
 
         try:
+            from domain.voice.entities import VoiceProfile
+            from domain.conversation.value_objects import Language
+            if state.command.voice_id:
+                voice_profile = VoiceProfile(
+                    name="user-selected",
+                    language=Language(state.target_language or "en"),
+                    voice_id=state.command.voice_id,
+                )
+            else:
+                voice_profile = CAPTAIN_PRESET
             audio_bytes = await self.tts_port.synthesize(
                 state.translation.translated_text,
-                CAPTAIN_PRESET,
+                voice_profile,
             )
         except Exception as e:
             logger.error(
@@ -327,7 +336,7 @@ Answer:"""
 
         audio_response = AudioResponse(
             translation_id=state.translation.id,
-            voice_profile_id=CAPTAIN_PRESET.id,
+            voice_profile_id=voice_profile.id,
             audio_path=str(audio_path),
             duration_ms=duration_ms,
         )
@@ -335,7 +344,7 @@ Answer:"""
         event = AudioSynthesized(
             command_id=state.command.id,
             audio_response_id=audio_response.id,
-            voice_profile_id=CAPTAIN_PRESET.id,
+            voice_profile_id=voice_profile.id,
             duration_ms=audio_response.duration_ms,
         )
         state.events.append(event)
