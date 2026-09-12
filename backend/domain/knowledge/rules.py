@@ -17,7 +17,7 @@ class MinMaxLengthRule:
     @staticmethod
     def evaluate(submission: KnowledgeSubmission) -> RuleOutcome:
         l = len(submission.raw_content.strip())
-        if l < 20 or l > 4000:
+        if l < 5 or l > 500000:
             return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.FAIL, reason="length_out_of_bounds")
         return RuleOutcome(rule_name=MinMaxLengthRule.NAME, verdict=RuleVerdict.PASS)
 
